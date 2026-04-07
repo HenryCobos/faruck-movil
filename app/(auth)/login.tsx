@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
   TouchableOpacity,
+  Linking,
 } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -168,6 +169,15 @@ export default function LoginScreen() {
             </View>
           </View>
 
+          <View style={[styles.legalRow, { marginBottom: insets.bottom + 4 }]}>
+            <TouchableOpacity onPress={() => Linking.openURL('https://henrycobos.github.io/faruck-movil/privacy-policy.html')}>
+              <Text style={styles.legalLink}>Política de Privacidad</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSep}>·</Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://henrycobos.github.io/faruck-movil/support.html')}>
+              <Text style={styles.legalLink}>Soporte</Text>
+            </TouchableOpacity>
+          </View>
           <Text style={[styles.version, { marginBottom: insets.bottom }]}>
             Préstamos AB v1.0.0
           </Text>
@@ -274,6 +284,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     color: Colors.muted,
+    marginTop: 4,
+  },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
     marginTop: 20,
   },
+  legalLink: { fontSize: 12, color: Colors.accent, fontWeight: '600' },
+  legalSep: { fontSize: 12, color: Colors.muted },
 });
