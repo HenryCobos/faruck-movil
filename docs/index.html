@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Préstamos AB — Sistema de Gestión de Créditos</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0D1B2A; color: #fff; }
+
+    /* Hero */
+    .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; text-align: center; background: linear-gradient(135deg, #0D1B2A 0%, #1a2f47 100%); }
+    .logo { font-size: 60px; margin-bottom: 16px; }
+    .hero h1 { font-size: 42px; font-weight: 900; color: #F5A623; letter-spacing: -1px; margin-bottom: 8px; }
+    .hero .subtitle { font-size: 18px; color: rgba(255,255,255,0.65); max-width: 500px; line-height: 1.6; margin-bottom: 40px; }
+    .badge { display: inline-block; background: rgba(245,166,35,0.15); border: 1px solid rgba(245,166,35,0.4); color: #F5A623; font-size: 13px; font-weight: 700; padding: 6px 16px; border-radius: 20px; margin-bottom: 24px; letter-spacing: 0.5px; }
+    .app-store-btn { display: inline-flex; align-items: center; gap: 10px; background: #fff; color: #0D1B2A; font-weight: 700; font-size: 16px; padding: 14px 28px; border-radius: 14px; text-decoration: none; transition: transform 0.2s; }
+    .app-store-btn:hover { transform: scale(1.03); }
+    .app-store-icon { font-size: 24px; }
+
+    /* Features */
+    .features { background: #f5f5f7; padding: 80px 24px; }
+    .features-inner { max-width: 900px; margin: 0 auto; }
+    .features h2 { text-align: center; font-size: 30px; font-weight: 800; color: #0D1B2A; margin-bottom: 48px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+    .feature-card { background: #fff; border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); }
+    .feature-icon { font-size: 36px; margin-bottom: 14px; }
+    .feature-card h3 { font-size: 17px; font-weight: 700; color: #0D1B2A; margin-bottom: 8px; }
+    .feature-card p { font-size: 14px; color: #555; line-height: 1.65; }
+
+    /* For who */
+    .forwho { background: #0D1B2A; padding: 80px 24px; text-align: center; }
+    .forwho h2 { font-size: 30px; font-weight: 800; color: #F5A623; margin-bottom: 16px; }
+    .forwho p { font-size: 16px; color: rgba(255,255,255,0.65); max-width: 580px; margin: 0 auto 40px; line-height: 1.7; }
+    .roles { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
+    .role-chip { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 30px; padding: 10px 22px; font-size: 14px; font-weight: 600; color: #fff; }
+
+    /* Footer */
+    footer { background: #060f18; padding: 32px 24px; text-align: center; }
+    footer p { font-size: 13px; color: rgba(255,255,255,0.4); margin-bottom: 8px; }
+    .footer-links { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; }
+    .footer-links a { font-size: 13px; color: #F5A623; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="logo">🏦</div>
+    <div class="badge">Disponible en App Store</div>
+    <h1>Préstamos AB</h1>
+    <p class="subtitle">Sistema profesional de gestión de créditos con garantía. Controla préstamos, cuotas, cobros y reportes desde tu iPhone.</p>
+    <a href="https://apps.apple.com" class="app-store-btn">
+      <span class="app-store-icon">🍎</span>
+      Descargar en el App Store
+    </a>
+  </section>
+
+  <!-- Features -->
+  <section class="features">
+    <div class="features-inner">
+      <h2>Todo lo que necesitas para gestionar tu cartera</h2>
+      <div class="grid">
+        <div class="feature-card">
+          <div class="feature-icon">👤</div>
+          <h3>Gestión de Clientes</h3>
+          <p>Registra y administra tus clientes con historial completo, scoring crediticio y estado de cuenta detallado.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💰</div>
+          <h3>Préstamos y Amortización</h3>
+          <p>Crea préstamos con amortización francesa o alemana. Visualiza el cronograma completo antes de aprobar.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🏠</div>
+          <h3>Control de Garantías</h3>
+          <p>Registra inmuebles, vehículos, joyas y más con fotos adjuntas. Vincula cada garantía a su préstamo.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💳</div>
+          <h3>Cobros y Recibos</h3>
+          <p>Registra pagos en segundos y genera comprobantes en PDF listos para compartir con el cliente.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>Reportes y Contabilidad</h3>
+          <p>Reportes de cartera, morosos, libro diario y estado de resultados siempre actualizados.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔔</div>
+          <h3>Notificaciones</h3>
+          <p>Recordatorios automáticos de cuotas próximas a vencer para no perder ningún cobro.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- For who -->
+  <section class="forwho">
+    <h2>Diseñado para equipos de crédito</h2>
+    <p>Asigna roles específicos a cada miembro de tu equipo. Cada persona accede solo a lo que necesita.</p>
+    <div class="roles">
+      <span class="role-chip">👑 Administrador</span>
+      <span class="role-chip">📋 Oficial de Crédito</span>
+      <span class="role-chip">💳 Cajero</span>
+      <span class="role-chip">🔍 Auditor</span>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>© 2026 Préstamos AB — Todos los derechos reservados</p>
+    <div class="footer-links">
+      <a href="privacy-policy.html">Política de Privacidad</a>
+      <a href="support.html">Soporte</a>
+      <a href="mailto:Gerencia@apuestasboyaca.com">Contacto</a>
+    </div>
+  </footer>
+
+</body>
+</html>

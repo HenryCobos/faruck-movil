@@ -1,0 +1,31 @@
+export const Colors = {
+  primary: '#0D1B2A',
+  primaryLight: '#1A2E44',
+  accent: '#F5A623',
+  accentDark: '#D4891A',
+  background: '#F0F4F8',
+  surface: '#FFFFFF',
+  surface2: '#F8FAFC',
+  border: '#E2E8F0',
+  borderDark: '#CBD5E1',
+  text: '#0D1B2A',
+  textSecondary: '#4A5568',
+  muted: '#8E9BB5',
+  success: '#2DD4A1',
+  successLight: '#D1FAF0',
+  danger: '#F05C5C',
+  dangerLight: '#FEE2E2',
+  warning: '#F59E0B',
+  warningLight: '#FEF3C7',
+  info: '#3D9CF0',
+  infoLight: '#DBEAFE',
+  white: '#FFFFFF',
+  black: '#000000',
+} as const;
+
+export const RoleColors = {
+  admin: '#F5A623',
+  oficial: '#3D9CF0',
+  cajero: '#2DD4A1',
+  auditor: '#9B74F5',
+} as const;
