@@ -89,6 +89,7 @@ export default function LoginScreen() {
           </View>
           <Text style={styles.appName}>PRÉSTAMOS AB</Text>
           <Text style={styles.tagline}>Sistema de Créditos con Garantía</Text>
+          <Text style={styles.enterpriseBadge}>Business Management Tool · For Authorized Staff Only</Text>
         </View>
       </View>
 
@@ -167,6 +168,13 @@ export default function LoginScreen() {
                 Conexión cifrada SSL. Solo personal autorizado puede acceder al sistema.
               </Text>
             </View>
+
+            <View style={styles.enterpriseNotice}>
+              <Text style={styles.enterpriseTitle}>🏢 Enterprise Business Tool</Text>
+              <Text style={styles.enterpriseText}>
+                This application is an internal management tool exclusively for authorized pawn shop businesses and their staff. It is not available to individual consumers. Account access is provided solely by the business administrator. No purchases, subscriptions, or financial transactions occur within this app.
+              </Text>
+            </View>
           </View>
 
           <View style={[styles.legalRow, { marginBottom: insets.bottom + 4 }]}>
@@ -227,6 +235,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.5,
   },
+  enterpriseBadge: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 0.3,
+    marginTop: -2,
+  },
 
   formScroll: {
     paddingHorizontal: 20,
@@ -279,6 +293,25 @@ const styles = StyleSheet.create({
   },
   securityIcon: { fontSize: 16, marginTop: 1 },
   securityText: { flex: 1, fontSize: 12, color: Colors.muted, lineHeight: 18 },
+
+  enterpriseNotice: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2563EB',
+    padding: 12,
+    gap: 6,
+  },
+  enterpriseTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  enterpriseText: {
+    fontSize: 11,
+    color: '#3B5BA5',
+    lineHeight: 17,
+  },
 
   version: {
     textAlign: 'center',
