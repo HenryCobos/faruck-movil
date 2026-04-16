@@ -89,7 +89,7 @@ export default function LoginScreen() {
           </View>
           <Text style={styles.appName}>PRÉSTAMOS AB</Text>
           <Text style={styles.tagline}>Sistema de Créditos con Garantía</Text>
-          <Text style={styles.enterpriseBadge}>Business Management Tool · For Authorized Staff Only</Text>
+          <Text style={styles.enterpriseBadge}>Sistema Privado · Solo Personal Autorizado</Text>
         </View>
       </View>
 
@@ -170,9 +170,9 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.enterpriseNotice}>
-              <Text style={styles.enterpriseTitle}>🏢 Enterprise Business Tool</Text>
+              <Text style={styles.enterpriseTitle}>🔒 Sistema de Gestión Privado</Text>
               <Text style={styles.enterpriseText}>
-                This application is an internal management tool exclusively for authorized pawn shop businesses and their staff. It is not available to individual consumers. Account access is provided solely by the business administrator. No purchases, subscriptions, or financial transactions occur within this app.
+                This is a custom-built, bespoke software tool developed exclusively for one specific pawn shop business and its staff. It is not a service, not a subscription, and not available to any other business or individual. No purchases, subscriptions, or financial transactions of any kind occur within this app.
               </Text>
             </View>
           </View>

@@ -45,6 +45,9 @@ export default function PerfilScreen() {
   const [savingPerfil, setSavingPerfil] = useState(false);
   const [savingPass, setSavingPass] = useState(false);
   const [tab, setTab] = useState<'perfil' | 'seguridad'>('perfil');
+  const [deleteStep, setDeleteStep] = useState<'idle' | 'confirm' | 'password'>('idle');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const roleColor = RoleColors[profile?.rol ?? 'cajero'] ?? Colors.muted;
 
@@ -102,6 +105,20 @@ export default function PerfilScreen() {
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Salir', style: 'destructive', onPress: signOut },
     ]);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      Alert.alert('Error', 'Ingresa tu contraseña para continuar.');
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      await usuariosService.eliminarCuenta(deletePassword);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo eliminar la cuenta.');
+      setDeletingAccount(false);
+    }
   };
 
   return (
@@ -222,6 +239,76 @@ export default function PerfilScreen() {
             <Text style={styles.signOutText}>Cerrar Sesión</Text>
           </TouchableOpacity>
 
+          {/* Zona de Peligro */}
+          <View style={styles.dangerZone}>
+            <Text style={styles.dangerZoneTitle}>⚠️ Zona de Peligro</Text>
+            <Text style={styles.dangerZoneDesc}>
+              Eliminar tu cuenta es una acción permanente e irreversible. Se borrarán tus datos de acceso del sistema.
+            </Text>
+
+            {deleteStep === 'idle' && (
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => setDeleteStep('confirm')}
+              >
+                <Text style={styles.deleteBtnText}>🗑️ Eliminar mi cuenta</Text>
+              </TouchableOpacity>
+            )}
+
+            {deleteStep === 'confirm' && (
+              <View style={styles.deleteConfirmBox}>
+                <Text style={styles.deleteConfirmText}>
+                  ¿Estás completamente seguro? Esta acción no se puede deshacer.
+                </Text>
+                <View style={styles.deleteConfirmBtns}>
+                  <TouchableOpacity
+                    style={styles.deleteCancelBtn}
+                    onPress={() => setDeleteStep('idle')}
+                  >
+                    <Text style={styles.deleteCancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deleteConfirmBtn}
+                    onPress={() => setDeleteStep('password')}
+                  >
+                    <Text style={styles.deleteConfirmBtnText}>Sí, continuar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {deleteStep === 'password' && (
+              <View style={styles.deleteConfirmBox}>
+                <Text style={styles.deleteConfirmText}>
+                  Ingresa tu contraseña actual para confirmar la eliminación:
+                </Text>
+                <Input
+                  label="Contraseña"
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  secureTextEntry
+                />
+                <View style={styles.deleteConfirmBtns}>
+                  <TouchableOpacity
+                    style={styles.deleteCancelBtn}
+                    onPress={() => { setDeleteStep('idle'); setDeletePassword(''); }}
+                  >
+                    <Text style={styles.deleteCancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.deleteConfirmBtn, deletingAccount && { opacity: 0.6 }]}
+                    onPress={handleDeleteAccount}
+                    disabled={deletingAccount}
+                  >
+                    <Text style={styles.deleteConfirmBtnText}>
+                      {deletingAccount ? 'Eliminando...' : 'Eliminar cuenta'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+
           {/* Legal */}
           <View style={styles.legalRow}>
             <TouchableOpacity onPress={() => Linking.openURL('https://henrycobos.github.io/faruck-movil/privacy-policy.html')}>
@@ -292,4 +379,28 @@ const styles = StyleSheet.create({
   legalLink: { fontSize: 12, color: Colors.accent, fontWeight: '600' },
   legalSep: { fontSize: 12, color: Colors.muted },
   version: { textAlign: 'center', fontSize: 12, color: Colors.muted, marginTop: 4 },
+  dangerZone: {
+    backgroundColor: `${Colors.danger}08`,
+    borderRadius: 14, padding: 18, gap: 12,
+    borderWidth: 1, borderColor: `${Colors.danger}30`,
+  },
+  dangerZoneTitle: { fontSize: 13, fontWeight: '800', color: Colors.danger, textTransform: 'uppercase', letterSpacing: 0.8 },
+  dangerZoneDesc: { fontSize: 13, color: Colors.muted, lineHeight: 18 },
+  deleteBtn: {
+    backgroundColor: `${Colors.danger}15`, borderRadius: 10, padding: 14,
+    alignItems: 'center', borderWidth: 1, borderColor: `${Colors.danger}40`,
+  },
+  deleteBtnText: { fontSize: 14, fontWeight: '700', color: Colors.danger },
+  deleteConfirmBox: { gap: 12 },
+  deleteConfirmText: { fontSize: 13, color: Colors.text, lineHeight: 18 },
+  deleteConfirmBtns: { flexDirection: 'row', gap: 10 },
+  deleteCancelBtn: {
+    flex: 1, backgroundColor: Colors.surface, borderRadius: 10, padding: 12,
+    alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
+  },
+  deleteCancelText: { fontSize: 14, fontWeight: '600', color: Colors.muted },
+  deleteConfirmBtn: {
+    flex: 1, backgroundColor: Colors.danger, borderRadius: 10, padding: 12, alignItems: 'center',
+  },
+  deleteConfirmBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 });

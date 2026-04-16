@@ -120,4 +120,28 @@ export const usuariosService = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  async eliminarCuenta(password: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No hay sesión activa');
+
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: user.email!,
+      password,
+    });
+    if (authError) throw new Error('La contraseña es incorrecta');
+
+    auditoriaService.registrar({
+      tabla: 'profiles',
+      accion: 'eliminar',
+      registroId: user.id,
+      descripcion: 'El usuario solicitó la eliminación de su propia cuenta',
+    }).catch(() => {});
+
+    // Llama a la función SQL que elimina el usuario de auth.users (y profiles en cascada)
+    const { error: rpcError } = await supabase.rpc('delete_own_account');
+    if (rpcError) throw rpcError;
+
+    await supabase.auth.signOut();
+  },
 };
