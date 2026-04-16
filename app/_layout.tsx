@@ -14,24 +14,34 @@ export default function RootLayout() {
 
   // Cargar sesión inicial
   useEffect(() => {
-    // getSession() reads from SecureStore — NO network call, returns instantly.
-    // We set loading=false as soon as the session state is known so the splash
-    // screen hides immediately.  fetchProfile runs silently in the background.
+    // getSession() reads from SecureStore. If the stored refresh token is
+    // invalid (e.g. user recreated in DB, token expired), we wipe the cached
+    // session so the user lands on login cleanly instead of looping on errors.
     supabase.auth.getSession()
-      .then(({ data: { session } }) => {
-        setSession(session);
-        if (session?.user) {
-          fetchProfile(session.user.id).catch(() => {});
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          supabase.auth.signOut().catch(() => {});
+          setSession(null);
+        } else {
+          setSession(session);
+          if (session?.user) {
+            fetchProfile(session.user.id).catch(() => {});
+          }
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        supabase.auth.signOut().catch(() => {});
+        setSession(null);
+      })
       .finally(() => setLoading(false));
 
     // Handle subsequent auth events (sign-in, sign-out, token refresh).
-    // Does NOT touch the loading state — that was already resolved above.
-    // fetchProfile checks activo===false and auto-signs-out if needed.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          return;
+        }
         setSession(session);
         if (session?.user) {
           fetchProfile(session.user.id).catch(() => {});
