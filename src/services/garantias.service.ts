@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { Garantia } from '../types';
 import * as FileSystem from 'expo-file-system/legacy';
+import { auditoriaService } from './auditoria.service';
 
 export type CreateGarantiaDTO = Omit<Garantia, 'id' | 'created_at' | 'updated_at'>;
 
@@ -53,6 +54,33 @@ export const garantiasService = {
       .single();
     if (error) throw error;
     return data;
+  },
+
+  async eliminar(id: string): Promise<void> {
+    const { data: garantia, error: fetchError } = await supabase
+      .from('garantias')
+      .select('tipo, descripcion, estado')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    if (garantia.estado === 'en_garantia') {
+      throw new Error('No se puede eliminar una garantía que está siendo usada como respaldo de un préstamo activo.');
+    }
+
+    const { error } = await supabase
+      .from('garantias')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+
+    auditoriaService.registrar({
+      tabla: 'garantias',
+      accion: 'eliminar',
+      registroId: id,
+      descripcion: `Garantía eliminada: ${garantia.tipo} — ${garantia.descripcion?.substring(0, 60)}`,
+      datos: { tipo: garantia.tipo, descripcion: garantia.descripcion },
+    }).catch(() => {});
   },
 
   async uploadFoto(uri: string, garantiaId: string): Promise<string> {

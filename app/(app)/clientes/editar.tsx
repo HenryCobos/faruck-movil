@@ -18,6 +18,7 @@ import { Colors } from '@/constants/colors';
 const schema = z.object({
   nombre:           z.string().min(2, 'Mínimo 2 caracteres'),
   apellido:         z.string().min(2, 'Mínimo 2 caracteres'),
+  alias:            z.string().optional().or(z.literal('')),
   documento_tipo:   z.enum(['ci', 'pasaporte', 'ruc']),
   documento_numero: z.string().min(5, 'Número de documento inválido'),
   telefono:         z.string().min(7, 'Teléfono inválido'),
@@ -50,6 +51,7 @@ export default function EditarClienteScreen() {
       .then(c => reset({
         nombre:           c.nombre,
         apellido:         c.apellido,
+        alias:            c.alias ?? '',
         documento_tipo:   c.documento_tipo as any,
         documento_numero: c.documento_numero,
         telefono:         c.telefono,
@@ -57,7 +59,7 @@ export default function EditarClienteScreen() {
         direccion:        c.direccion,
         scoring:          c.scoring,
       }))
-      .catch(() => { Alert.alert('Error', 'No se pudo cargar el cliente'); router.back(); })
+      .catch(() => { Alert.alert('Error', 'No se pudo cargar el cliente'); router.canGoBack() ? router.back() : router.replace('/(app)/clientes'); })
       .finally(() => setLoadingData(false));
   }, [id]);
 
@@ -67,11 +69,12 @@ export default function EditarClienteScreen() {
     try {
       await clientesService.update(id, {
         ...data,
+        alias: data.alias || undefined,
         email: data.email || undefined,
         scoring: Number(data.scoring),
       } as any);
       Alert.alert('✅ Guardado', 'Los datos del cliente fueron actualizados.', [
-        { text: 'Aceptar', onPress: () => router.back() },
+        { text: 'Aceptar', onPress: () => router.canGoBack() ? router.back() : router.replace('/(app)/clientes') },
       ]);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'No se pudo guardar');
@@ -85,7 +88,7 @@ export default function EditarClienteScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/clientes')} style={styles.backBtn}>
           <Text style={styles.backIcon}>✕</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Editar Cliente</Text>
@@ -112,6 +115,17 @@ export default function EditarClienteScreen() {
                 )} />
               </View>
             </View>
+            <Controller control={control} name="alias" render={({ field: { onChange, value } }) => (
+              <Input
+                label="Alias (opcional)"
+                placeholder="Ej: Juancho, El gordo, La señora del mercado..."
+                value={value}
+                onChangeText={onChange}
+                error={errors.alias?.message}
+                hint="Nombre informal para identificarlo rápidamente en búsquedas"
+                leftIcon={<Text style={styles.fi}>🏷️</Text>}
+              />
+            )} />
             <Controller control={control} name="documento_tipo" render={({ field: { onChange, value } }) => (
               <Select label="Tipo de Documento" options={DOC_OPTIONS} value={value} onSelect={onChange} />
             )} />

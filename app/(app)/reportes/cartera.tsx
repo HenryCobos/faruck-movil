@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   RefreshControl, Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -73,15 +73,6 @@ function PrestamoCard({ item }: { item: PrestamoCartera }) {
           <Text style={styles.metricLabel}>Cobrado: </Text>
           <Text style={styles.metricValue}>{formatCurrency(item.total_cobrado)}</Text>
         </Text>
-        {item.mora_cobrada > 0 && (
-          <>
-            <Text style={styles.metricSep}>·</Text>
-            <Text style={styles.metricItem}>
-              <Text style={styles.metricLabel}>Mora: </Text>
-              <Text style={[styles.metricValue, { color: Colors.warning }]}>{formatCurrency(item.mora_cobrada)}</Text>
-            </Text>
-          </>
-        )}
       </View>
 
       {/* Barra de progreso */}
@@ -89,7 +80,7 @@ function PrestamoCard({ item }: { item: PrestamoCartera }) {
         <View style={styles.progressBg}>
           <View style={[styles.progressFill, { width: `${Math.min(progreso * 100, 100)}%`, backgroundColor: color }]} />
         </View>
-        <Text style={styles.progressText}>{item.cuotas_pagadas}/{item.cuotas_total} cuotas · {item.tasa_mensual}% mensual</Text>
+        <Text style={styles.progressText}>{item.cuotas_pagadas}/{item.cuotas_total} cuotas · {(item.tasa_mensual * 100).toFixed(2)}% mensual</Text>
       </View>
 
       {item.garantia_tipo ? (
@@ -144,7 +135,11 @@ export default function CarteraScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   // El filtrado se recalcula siempre que cambien los datos O el filtro/búsqueda
   useEffect(() => {
@@ -187,7 +182,7 @@ export default function CarteraScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/reportes')} style={styles.backBtn}>
             <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Cartera</Text>

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Alert, RefreshControl, Share, Linking, ActivityIndicator,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Print from 'expo-print';
@@ -11,7 +11,7 @@ import * as Sharing from 'expo-sharing';
 import { clientesService } from '@/services/clientes.service';
 import { configuracionService, Configuracion } from '@/services/configuracion.service';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
-import { formatCurrency } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -34,14 +34,12 @@ interface ResumenPrestamo {
   fecha_desembolso?: string;
   cuotas_total: number;
   cuotas_pagadas: number;
-  total_a_pagar: number;   // capital + interest total
-  total_pagado: number;    // actual amount paid (from pagos)
+  total_a_pagar: number;
+  total_pagado: number;
   capital_pagado: number;
   interes_proyectado: number;
   interes_pagado: number;
   saldo_capital: number;
-  mora_acumulada: number;
-  mora_cobrada: number;    // actual mora collected (from pagos)
   garantia_tipo: string;
   proxima_cuota: ProximaCuota | null;
 }
@@ -49,7 +47,6 @@ interface ResumenPrestamo {
 interface PagoReciente {
   fecha_pago: string;
   monto_pagado: number;
-  mora_cobrada: number;
   metodo_pago: string;
   numero_cuota: number;
   prestamo_monto: number;
@@ -64,8 +61,6 @@ interface EstadoCuenta {
     saldo_total: number;
     pagado_total: number;
     interes_pagado: number;
-    mora_total: number;
-    mora_cobrada: number;
     prestamos_activos: number;
   };
 }
@@ -82,8 +77,8 @@ async function buildEstadoCuenta(clienteId: string): Promise<EstadoCuenta> {
       garantias(tipo),
       cuotas(
         id, numero_cuota, estado, capital, interes, monto_total,
-        mora_acumulada, fecha_vencimiento,
-        pagos(monto_pagado, mora_cobrada, fecha_pago, metodo_pago)
+        fecha_vencimiento,
+        pagos(monto_pagado, fecha_pago, metodo_pago, anulado)
       )
     `)
     .eq('cliente_id', clienteId)
@@ -105,29 +100,39 @@ async function buildEstadoCuenta(clienteId: string): Promise<EstadoCuenta> {
       .filter((c: any) => c.estado !== 'pagada')
       .sort((a: any, b: any) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento));
 
-    const saldo_capital     = cuotasPendientes.reduce((s: number, c: any) => s + Number(c.capital), 0);
-    const mora_acumulada    = cuotas.reduce((s: number, c: any) => s + Number(c.mora_acumulada ?? 0), 0);
     const interes_proyectado = cuotas.reduce((s: number, c: any) => s + Number(c.interes), 0);
-    const interes_pagado    = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.interes), 0);
-    const capital_pagado    = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.capital), 0);
-    const total_a_pagar     = cuotas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
+    const interes_pagado     = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.interes), 0);
+    const capital_pagado     = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.capital), 0);
+    const total_a_pagar      = cuotas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
 
-    // Suma de pagos registrados
     const allCuotaPagos = cuotas.flatMap((c: any) => (c.pagos ?? []).map((pg: any) => ({
       ...pg,
       numero_cuota: c.numero_cuota,
     })));
-    const total_pagado  = allCuotaPagos.reduce((s: number, pg: any) => s + Number(pg.monto_pagado ?? 0), 0);
-    const mora_cobrada  = allCuotaPagos.reduce((s: number, pg: any) => s + Number(pg.mora_cobrada ?? 0), 0);
+    const pagosVigentes = allCuotaPagos.filter((pg: any) => !pg.anulado);
+    const total_pagado  = pagosVigentes.reduce((s: number, pg: any) => s + Number(pg.monto_pagado ?? 0), 0);
 
-    // Collect pagos for the "recent payments" section
-    allCuotaPagos.forEach((pg: any) => {
+    // Saldo capital: for normal pending cuotas use scheduled capital; for partially paid
+    // cuotas, discount what has already been collected (proportional to capital fraction).
+    const saldo_capital = cuotasPendientes.reduce((s: number, c: any) => {
+      if (c.estado === 'parcial') {
+        const pagadoEnCuota = (c.pagos ?? [])
+          .filter((pg: any) => !pg.anulado)
+          .reduce((acc: number, pg: any) => acc + Number(pg.monto_pagado ?? 0), 0);
+        const montoTotal = Number(c.monto_total);
+        const capitalFraction = montoTotal > 0 ? Number(c.capital) / montoTotal : 1;
+        const remaining = Math.max(0, montoTotal - pagadoEnCuota);
+        return s + Math.round(remaining * capitalFraction * 100) / 100;
+      }
+      return s + Number(c.capital);
+    }, 0);
+
+    pagosVigentes.forEach((pg: any) => {
       allPagos.push({
-        fecha_pago:    pg.fecha_pago,
-        monto_pagado:  Number(pg.monto_pagado),
-        mora_cobrada:  Number(pg.mora_cobrada ?? 0),
-        metodo_pago:   pg.metodo_pago ?? 'efectivo',
-        numero_cuota:  pg.numero_cuota,
+        fecha_pago:     pg.fecha_pago,
+        monto_pagado:   Number(pg.monto_pagado),
+        metodo_pago:    pg.metodo_pago ?? 'efectivo',
+        numero_cuota:   pg.numero_cuota,
         prestamo_monto: Number(p.monto_principal),
       });
     });
@@ -136,7 +141,7 @@ async function buildEstadoCuenta(clienteId: string): Promise<EstadoCuenta> {
     let proxima_cuota: ProximaCuota | null = null;
     if (cuotasPendientes.length > 0) {
       const c = cuotasPendientes[0];
-      const venc = new Date(c.fecha_vencimiento);
+      const venc = parseFechaLocal(c.fecha_vencimiento);
       venc.setHours(0, 0, 0, 0);
       const dias = Math.round((venc.getTime() - hoy.getTime()) / 86400000);
       proxima_cuota = {
@@ -164,8 +169,6 @@ async function buildEstadoCuenta(clienteId: string): Promise<EstadoCuenta> {
       interes_proyectado:  Math.round(interes_proyectado * 100) / 100,
       interes_pagado:      Math.round(interes_pagado * 100) / 100,
       saldo_capital:       Math.round(saldo_capital * 100) / 100,
-      mora_acumulada:      Math.round(mora_acumulada * 100) / 100,
-      mora_cobrada:        Math.round(mora_cobrada * 100) / 100,
       garantia_tipo:       p.garantias?.tipo ?? '',
       proxima_cuota,
     };
@@ -183,13 +186,11 @@ async function buildEstadoCuenta(clienteId: string): Promise<EstadoCuenta> {
     prestamos,
     pagos_recientes,
     totales: {
-      deuda_original:     Math.round(activos.reduce((s, p) => s + p.monto_principal, 0) * 100) / 100,
-      saldo_total:        Math.round(activos.reduce((s, p) => s + p.saldo_capital, 0) * 100) / 100,
-      pagado_total:       Math.round(prestamos.reduce((s, p) => s + p.total_pagado, 0) * 100) / 100,
-      interes_pagado:     Math.round(prestamos.reduce((s, p) => s + p.interes_pagado, 0) * 100) / 100,
-      mora_total:         Math.round(activos.reduce((s, p) => s + p.mora_acumulada, 0) * 100) / 100,
-      mora_cobrada:       Math.round(prestamos.reduce((s, p) => s + p.mora_cobrada, 0) * 100) / 100,
-      prestamos_activos:  activos.length,
+      deuda_original:    Math.round(activos.reduce((s, p) => s + p.monto_principal, 0) * 100) / 100,
+      saldo_total:       Math.round(activos.reduce((s, p) => s + p.saldo_capital, 0) * 100) / 100,
+      pagado_total:      Math.round(prestamos.reduce((s, p) => s + p.total_pagado, 0) * 100) / 100,
+      interes_pagado:    Math.round(prestamos.reduce((s, p) => s + p.interes_pagado, 0) * 100) / 100,
+      prestamos_activos: activos.length,
     },
   };
 }
@@ -232,7 +233,6 @@ function generarTextoWhatsApp(ec: EstadoCuenta, cfg: Configuracion): string {
     `💰 Saldo pendiente: *${s}${t.saldo_total.toLocaleString('es')}*`,
     `✅ Total pagado: ${s}${t.pagado_total.toLocaleString('es')}`,
     `📈 Interés pagado: ${s}${t.interes_pagado.toLocaleString('es')}`,
-    ...(t.mora_total > 0 ? [`⚠️ Mora acumulada: *${s}${t.mora_total.toFixed(2)}*`] : []),
     '',
     `📋 *Préstamos activos: ${t.prestamos_activos}*`,
   ];
@@ -308,8 +308,7 @@ function generarHtml(ec: EstadoCuenta, config: Configuracion): string {
       <td style="text-align:right;color:#0369a1">${s}${p.interes_pagado.toLocaleString('es')} <span style="color:#aaa;font-size:9px">/ ${s}${p.interes_proyectado.toLocaleString('es')}</span></td>
       <td style="text-align:right;color:#dc2626">${s}${p.saldo_capital.toLocaleString('es')}</td>
       <td style="text-align:center">${p.cuotas_pagadas}/${p.cuotas_total} (${progreso}%)</td>
-      ${p.mora_acumulada > 0 ? `<td style="color:#dc2626;text-align:right">${s}${p.mora_acumulada.toFixed(2)}</td>` : '<td style="text-align:center;color:#ccc">—</td>'}
-      <td style="font-size:10px">${pcLabel}</td>
+        <td style="font-size:10px">${pcLabel}</td>
       <td><span style="background:${estadoColor}20;color:${estadoColor};padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700">${p.estado.toUpperCase()}</span></td>
     </tr>`;
   }).join('');
@@ -323,7 +322,6 @@ function generarHtml(ec: EstadoCuenta, config: Configuracion): string {
       <td>${icon} ${pg.metodo_pago}</td>
       <td>Préstamo ${s}${pg.prestamo_monto.toLocaleString('es')} — Cuota ${pg.numero_cuota}</td>
       <td style="text-align:right;font-weight:700;color:#0d9488">${s}${pg.monto_pagado.toLocaleString('es')}</td>
-      ${pg.mora_cobrada > 0 ? `<td style="text-align:right;color:#b45309">${s}${pg.mora_cobrada.toFixed(2)}</td>` : '<td style="text-align:center;color:#ccc">—</td>'}
     </tr>`;
   }).join('');
 
@@ -365,11 +363,9 @@ function generarHtml(ec: EstadoCuenta, config: Configuracion): string {
     <div class="kpi"><div class="kv">${s}${ec.totales.pagado_total.toLocaleString('es')}</div><div class="kl">Total pagado</div></div>
     <div class="kpi"><div class="kv" style="color:#6ee7b7">${s}${ec.totales.interes_pagado.toLocaleString('es')}</div><div class="kl">Interés pagado</div></div>
     <div class="kpi"><div class="kv">${s}${ec.totales.deuda_original.toLocaleString('es')}</div><div class="kl">Deuda original</div></div>
-    <div class="kpi"><div class="kv" style="color:${ec.totales.mora_total > 0 ? '#ef4444' : acento}">${s}${ec.totales.mora_total.toFixed(2)}</div><div class="kl">Mora acumulada</div></div>
     <div class="kpi"><div class="kv">${ec.totales.prestamos_activos}</div><div class="kl">Activos</div></div>
   </div>
 
-  ${ec.totales.mora_total > 0 ? `<div class="alerta">⚠️ Mora acumulada: ${s}${ec.totales.mora_total.toFixed(2)} · Tasa: ${config.tasa_mora_label}</div>` : ''}
 
   <div class="titulo">Detalle de Préstamos</div>
   <table>
@@ -379,7 +375,6 @@ function generarHtml(ec: EstadoCuenta, config: Configuracion): string {
       <th style="text-align:right">Int. Pagado / Proyect.</th>
       <th style="text-align:right">Saldo Cap.</th>
       <th style="text-align:center">Cuotas</th>
-      <th style="text-align:right">Mora</th>
       <th>Próxima Cuota</th><th>Estado</th>
     </tr></thead>
     <tbody>${filasPrestamos}</tbody>
@@ -390,7 +385,7 @@ function generarHtml(ec: EstadoCuenta, config: Configuracion): string {
   <table>
     <thead><tr>
       <th>Fecha</th><th>Método</th><th>Concepto</th>
-      <th style="text-align:right">Monto</th><th style="text-align:right">Mora</th>
+      <th style="text-align:right">Monto</th>
     </tr></thead>
     <tbody>${filasPageos}</tbody>
   </table>` : ''}
@@ -413,7 +408,7 @@ export default function EstadoCuentaScreen() {
   const [exporting,  setExporting]  = useState(false);
   const [sharing,    setSharing]    = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!id) { setLoading(false); return; }
     try {
       const [ec, cfg] = await Promise.all([
@@ -428,9 +423,13 @@ export default function EstadoCuentaScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const exportarPDF = async () => {
     if (!data || !config) return;
@@ -495,7 +494,7 @@ export default function EstadoCuentaScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/clientes')} style={styles.backBtn}>
             <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Estado de Cuenta</Text>
@@ -557,7 +556,6 @@ export default function EstadoCuentaScreen() {
             { val: formatCurrency(totales.deuda_original), label: 'Deuda original',   color: 'rgba(255,255,255,0.8)' },
             { val: formatCurrency(totales.pagado_total),   label: 'Total pagado',     color: Colors.success },
             { val: formatCurrency(totales.interes_pagado), label: 'Interés pagado',   color: '#93c5fd' },
-            { val: formatCurrency(totales.mora_total),     label: 'Mora acumulada',   color: totales.mora_total > 0 ? Colors.warning : Colors.muted },
             { val: String(totales.prestamos_activos),      label: 'Préstamos activos',color: Colors.accent  },
           ].map(({ val, label, color }) => (
             <View key={label} style={styles.kpiItem}>
@@ -567,16 +565,6 @@ export default function EstadoCuentaScreen() {
           ))}
         </View>
 
-        {/* ── Mora alert ── */}
-        {totales.mora_total > 0 && (
-          <View style={styles.moraAlerta}>
-            <Text style={styles.moraAlertaIcon}>⚠️</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.moraAlertaText}>Mora acumulada: {formatCurrency(totales.mora_total)}</Text>
-              <Text style={styles.moraAlertaSub}>Mora cobrada: {formatCurrency(totales.mora_cobrada)} · Tasa: {config?.tasa_mora_label}</Text>
-            </View>
-          </View>
-        )}
 
         {/* ── Loans ── */}
         <Text style={styles.sectionTitle}>Detalle de Préstamos</Text>
@@ -621,12 +609,6 @@ export default function EstadoCuentaScreen() {
                   <Text style={styles.gridLabel}>Saldo capital</Text>
                   <Text style={[styles.gridValue, { color: Colors.danger }]}>{formatCurrency(p.saldo_capital)}</Text>
                 </View>
-                {p.mora_acumulada > 0 && (
-                  <View style={styles.gridItem}>
-                    <Text style={styles.gridLabel}>Mora</Text>
-                    <Text style={[styles.gridValue, { color: Colors.warning }]}>{formatCurrency(p.mora_acumulada)}</Text>
-                  </View>
-                )}
               </View>
 
               {/* Progress */}
@@ -680,9 +662,6 @@ export default function EstadoCuentaScreen() {
                       Cuota {pg.numero_cuota} · Préstamo {formatCurrency(pg.prestamo_monto)}
                     </Text>
                     <Text style={styles.pagoFecha}>{fmtFecha(pg.fecha_pago)} · {pg.metodo_pago}</Text>
-                    {pg.mora_cobrada > 0 && (
-                      <Text style={styles.pagoMora}>+ Mora: {formatCurrency(pg.mora_cobrada)}</Text>
-                    )}
                   </View>
                   <Text style={styles.pagoMonto}>{formatCurrency(pg.monto_pagado)}</Text>
                 </View>
@@ -753,15 +732,6 @@ const styles = StyleSheet.create({
   kpiValue: { fontSize: 16, fontWeight: '900' },
   kpiLabel: { fontSize: 9, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: 0.7, textAlign: 'center' },
 
-  // Mora alert
-  moraAlerta: {
-    flexDirection: 'row', gap: 10, backgroundColor: `${Colors.warning}12`,
-    borderRadius: 10, padding: 12, borderWidth: 1, borderColor: `${Colors.warning}30`,
-  },
-  moraAlertaIcon: { fontSize: 18 },
-  moraAlertaText: { fontSize: 13, color: Colors.warning, fontWeight: '700' },
-  moraAlertaSub: { fontSize: 11, color: Colors.muted, marginTop: 2 },
-
   // Section title
   sectionTitle: { fontSize: 12, fontWeight: '700', color: Colors.muted, textTransform: 'uppercase', letterSpacing: 0.8 },
 
@@ -815,6 +785,5 @@ const styles = StyleSheet.create({
   pagoInfo: { flex: 1, gap: 2 },
   pagoConcepto: { fontSize: 13, fontWeight: '600', color: Colors.text },
   pagoFecha: { fontSize: 11, color: Colors.muted, textTransform: 'capitalize' },
-  pagoMora: { fontSize: 11, color: Colors.warning, fontWeight: '600' },
   pagoMonto: { fontSize: 15, fontWeight: '800', color: Colors.success },
 });

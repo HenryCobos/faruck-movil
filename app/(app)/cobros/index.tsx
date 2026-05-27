@@ -11,19 +11,17 @@ import { SearchBar } from '@/components/ui/SearchBar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
-import { formatCurrency } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
 
-function diasLabel(dias: number) {
-  if (dias === 0) return null;
-  if (dias === 1) return '1 día de mora';
-  return `${dias} días de mora`;
+function getLocalHoy(): string {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
 }
 
 function CuotaCard({ item }: { item: CuotaPendiente }) {
-  const isVencida = item.dias_mora > 0;
-  const mora = item.mora_calculada ?? cobrosService.calcularMora(item.monto_total, item.fecha_vencimiento);
-  const totalConMora = item.monto_total + mora;
+  const hoy = getLocalHoy();
+  const isVencida = item.fecha_vencimiento < hoy;
 
   return (
     <TouchableOpacity
@@ -40,23 +38,23 @@ function CuotaCard({ item }: { item: CuotaPendiente }) {
       </View>
 
       <View style={styles.cardBody}>
-        <Text style={styles.clienteName}>{item.cliente_nombre} {item.cliente_apellido}</Text>
+        <Text style={styles.clienteName}>
+          {item.cliente_nombre} {item.cliente_apellido}
+          {!!item.cliente_alias && <Text style={styles.clienteAlias}> · {item.cliente_alias}</Text>}
+        </Text>
         <Text style={styles.clienteDoc}>{item.cliente_documento}</Text>
         <Text style={styles.vencimiento}>
-          Vence: {new Date(item.fecha_vencimiento).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' })}
+          Vence: {parseFechaLocal(item.fecha_vencimiento).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' })}
         </Text>
         {isVencida && (
-          <Text style={styles.moraLabel}>⚠️ {diasLabel(item.dias_mora)}</Text>
+          <Text style={styles.vencidaLabel}>⚠️ Cuota vencida</Text>
         )}
       </View>
 
       <View style={styles.cardRight}>
         <Text style={[styles.total, isVencida && styles.totalVencida]}>
-          {formatCurrency(totalConMora)}
+          {formatCurrency(item.monto_total)}
         </Text>
-        {mora > 0 && (
-          <Text style={styles.moraAmount}>+{formatCurrency(mora)} mora</Text>
-        )}
         <Badge label={isVencida ? 'Vencida' : 'Pendiente'} variant={isVencida ? 'danger' : 'default'} />
       </View>
     </TouchableOpacity>
@@ -71,6 +69,7 @@ export default function CobrosScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filtro, setFiltro] = useState<'todas' | 'vencidas' | 'hoy'>('todas');
+  const hoy = getLocalHoy();
 
   // Sólo carga datos desde la red; no toca el filtro activo
   const load = useCallback(async () => {
@@ -78,28 +77,30 @@ export default function CobrosScreen() {
       const data = await cobrosService.getCuotasPendientes();
       setCuotas(data);
     } catch {
-      if (!refreshing) Alert.alert('Error de conexión', 'No se pudieron cargar las cuotas. Verifica tu conexión e intenta nuevamente.');
+      Alert.alert('Error de conexión', 'No se pudieron cargar las cuotas. Verifica tu conexión e intenta nuevamente.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [refreshing]);
+  }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   // El filtrado se recalcula siempre que cambien los datos O el filtro/búsqueda
   React.useEffect(() => {
     let r = cuotas;
-    if (filtro === 'vencidas') r = r.filter(c => c.dias_mora > 0);
-    if (filtro === 'hoy') {
-      const hoy = new Date().toISOString().split('T')[0];
-      r = r.filter(c => c.fecha_vencimiento === hoy);
-    }
+    if (filtro === 'vencidas') r = r.filter(c => c.fecha_vencimiento < hoy);
+    if (filtro === 'hoy') r = r.filter(c => c.fecha_vencimiento === hoy);
     if (search) {
       const ql = search.toLowerCase();
       r = r.filter(c =>
         c.cliente_nombre?.toLowerCase().includes(ql) ||
         c.cliente_apellido?.toLowerCase().includes(ql) ||
+        c.cliente_alias?.toLowerCase().includes(ql) ||
         c.cliente_documento?.includes(search)
       );
     }
@@ -111,9 +112,9 @@ export default function CobrosScreen() {
 
   const stats = {
     total: cuotas.length,
-    vencidas: cuotas.filter(c => c.dias_mora > 0).length,
-    hoy: cuotas.filter(c => c.fecha_vencimiento === new Date().toISOString().split('T')[0]).length,
-    montoPendiente: cuotas.reduce((s, c) => s + c.monto_total + (c.mora_calculada ?? 0), 0),
+    vencidas: cuotas.filter(c => c.fecha_vencimiento < hoy).length,
+    hoy: cuotas.filter(c => c.fecha_vencimiento === hoy).length,
+    montoPendiente: cuotas.reduce((s, c) => s + c.monto_total, 0),
   };
 
   if (loading) return <LoadingScreen label="Cargando cobros..." />;
@@ -192,9 +193,10 @@ const styles = StyleSheet.create({
   cuotaNum: { fontSize: 13, fontWeight: '800' },
   cardBody: { flex: 1, gap: 2 },
   clienteName: { fontSize: 14, fontWeight: '700', color: Colors.text },
+  clienteAlias: { fontSize: 12, color: Colors.primary, fontWeight: '600', fontStyle: 'italic' },
   clienteDoc: { fontSize: 11, color: Colors.muted },
   vencimiento: { fontSize: 11, color: Colors.muted },
-  moraLabel: { fontSize: 11, color: Colors.danger, fontWeight: '600' },
+  vencidaLabel: { fontSize: 11, color: Colors.danger, fontWeight: '600' },
   cardRight: { alignItems: 'flex-end', gap: 4 },
   total: { fontSize: 16, fontWeight: '800', color: Colors.text },
   totalVencida: { color: Colors.danger },

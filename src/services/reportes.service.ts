@@ -16,13 +16,11 @@ export interface PrestamoCartera {
   saldo_pendiente: number;
   garantia_tipo: string;
   garantia_descripcion: string;
-  // Campos de rentabilidad
-  interes_proyectado: number;   // total de interés que genera el préstamo
-  interes_cobrado: number;      // interés ya cobrado (cuotas pagadas)
-  total_a_cobrar: number;       // capital + interés total del préstamo
-  total_cobrado: number;        // capital + interés ya recibido
-  mora_cobrada: number;         // mora real cobrada (desde pagos)
-  rentabilidad: number;         // interes_proyectado / monto_principal * 100
+  interes_proyectado: number;
+  interes_cobrado: number;
+  total_a_cobrar: number;
+  total_cobrado: number;
+  rentabilidad: number;
 }
 
 export interface ClienteMoroso {
@@ -33,8 +31,6 @@ export interface ClienteMoroso {
   telefono: string;
   cuotas_vencidas: number;
   monto_vencido: number;
-  mora_total: number;
-  dias_mayor_mora: number;
   prestamos_activos: number;
 }
 
@@ -45,13 +41,11 @@ export interface ResumenCartera {
   vencidos: number;
   monto_total_cartera: number;
   monto_por_cobrar: number;
-  tasa_mora: number;
-  // Métricas de rentabilidad global
-  total_interes_proyectado: number; // suma de intereses proyectados (cartera activa)
-  total_a_recuperar: number;        // capital + intereses totales
-  total_recuperado: number;         // capital + interés ya cobrado
-  total_mora_cobrada: number;       // mora cobrada en toda la cartera
-  rentabilidad_global: number;      // total_interes_proyectado / monto_total_cartera * 100
+  cuotas_vencidas: number;
+  total_interes_proyectado: number;
+  total_a_recuperar: number;
+  total_recuperado: number;
+  rentabilidad_global: number;
 }
 
 export const reportesService = {
@@ -62,11 +56,17 @@ export const reportesService = {
         id, monto_principal, tasa_mensual, plazo_meses, fecha_desembolso, estado,
         clientes(nombre, apellido, documento_numero),
         garantias(tipo, descripcion),
-        cuotas(id, estado, monto_total, capital, interes, pagos(mora_cobrada))
+        cuotas(id, estado, monto_total, capital, interes),
+        abonos_capital(monto_abono, anulado)
       `)
       .order('created_at', { ascending: false });
 
-    if (estado) q = q.eq('estado', estado);
+    if (estado) {
+      q = q.eq('estado', estado);
+    } else {
+      // Exclude pre-disbursement loans — they have no cuotas yet and distort the report
+      q = q.in('estado', ['activo', 'cancelado', 'vencido', 'renovado']);
+    }
 
     const { data, error } = await q;
     if (error) throw error;
@@ -76,38 +76,28 @@ export const reportesService = {
       const cuotasPagadas = cuotas.filter((c: any) => c.estado === 'pagada');
       const cuotasPendientes = cuotas.filter((c: any) => c.estado !== 'pagada');
 
-      // Capital
-      const saldo_pendiente = cuotasPendientes.reduce((s: number, c: any) => s + Number(c.capital), 0);
-
-      // Interés
+      const saldo_pendiente    = cuotasPendientes.reduce((s: number, c: any) => s + Number(c.capital), 0);
       const interes_proyectado = cuotas.reduce((s: number, c: any) => s + Number(c.interes), 0);
       const interes_cobrado    = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.interes), 0);
-
-      // Totales
-      const total_a_cobrar = cuotas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
-      const capital_cobrado = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.capital), 0);
-      const total_cobrado   = capital_cobrado + interes_cobrado;
-
-      // Mora real (suma de pagos.mora_cobrada)
-      const mora_cobrada = cuotas.reduce((s: number, c: any) => {
-        const pags = c.pagos ?? [];
-        return s + pags.reduce((ps: number, pg: any) => ps + Number(pg.mora_cobrada ?? 0), 0);
-      }, 0);
-
-      const principal = Number(p.monto_principal);
+      const total_a_cobrar     = cuotas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
+      const capital_cobrado    = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.capital), 0);
+      // Solo abonos vigentes (no anulados) como capital cobrado fuera de cuotas normales
+      const capital_abonado    = (p.abonos_capital ?? []).filter((a: any) => !a.anulado).reduce((s: number, a: any) => s + Number(a.monto_abono), 0);
+      const total_cobrado      = capital_cobrado + interes_cobrado + capital_abonado;
+      const principal          = Number(p.monto_principal);
 
       return {
         id: p.id,
-        cliente_nombre: p.clientes?.nombre ?? '',
-        cliente_apellido: p.clientes?.apellido ?? '',
-        cliente_documento: p.clientes?.documento_numero ?? '',
-        monto_principal: principal,
-        tasa_mensual: Number(p.tasa_mensual),
-        plazo_meses: p.plazo_meses,
-        fecha_desembolso: p.fecha_desembolso,
-        estado: p.estado,
-        cuotas_pagadas: cuotasPagadas.length,
-        cuotas_total: cuotas.length,
+        cliente_nombre:      p.clientes?.nombre ?? '',
+        cliente_apellido:    p.clientes?.apellido ?? '',
+        cliente_documento:   p.clientes?.documento_numero ?? '',
+        monto_principal:     principal,
+        tasa_mensual:        Number(p.tasa_mensual),
+        plazo_meses:         p.plazo_meses,
+        fecha_desembolso:    p.fecha_desembolso,
+        estado:              p.estado,
+        cuotas_pagadas:      cuotasPagadas.length,
+        cuotas_total:        cuotas.length,
         saldo_pendiente:     Math.round(saldo_pendiente * 100) / 100,
         garantia_tipo:       p.garantias?.tipo ?? '',
         garantia_descripcion: p.garantias?.descripcion ?? '',
@@ -115,7 +105,6 @@ export const reportesService = {
         interes_cobrado:     Math.round(interes_cobrado * 100) / 100,
         total_a_cobrar:      Math.round(total_a_cobrar * 100) / 100,
         total_cobrado:       Math.round(total_cobrado * 100) / 100,
-        mora_cobrada:        Math.round(mora_cobrada * 100) / 100,
         rentabilidad:        principal > 0 ? Math.round((interes_proyectado / principal) * 10000) / 100 : 0,
       };
     });
@@ -124,53 +113,36 @@ export const reportesService = {
   async getResumenCartera(): Promise<ResumenCartera> {
     const { data, error } = await supabase
       .from('prestamos')
-      .select('estado, monto_principal, cuotas(estado, capital, interes, monto_total, pagos(mora_cobrada))');
+      .select('estado, monto_principal, cuotas(estado, capital, interes, monto_total), abonos_capital(monto_abono, anulado)');
     if (error) throw error;
 
-    const prestamos = data ?? [];
-    const total    = prestamos.length;
-    const activos  = prestamos.filter((p: any) => p.estado === 'activo').length;
+    const prestamos  = data ?? [];
+    const total      = prestamos.length;
+    const activos    = prestamos.filter((p: any) => p.estado === 'activo').length;
     const cancelados = prestamos.filter((p: any) => p.estado === 'cancelado').length;
-    const vencidos = prestamos.filter((p: any) => p.estado === 'vencido').length;
+    const vencidos   = prestamos.filter((p: any) => p.estado === 'vencido').length;
 
     const activosList = prestamos.filter((p: any) => p.estado === 'activo');
 
-    const monto_total = activosList
-      .reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
+    const monto_total  = activosList.reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
+    const monto_cobrar = activosList.reduce((s: number, p: any) =>
+      s + (p.cuotas ?? []).filter((c: any) => c.estado !== 'pagada')
+        .reduce((cs: number, c: any) => cs + Number(c.capital), 0), 0);
 
-    const monto_cobrar = activosList.reduce((s: number, p: any) => {
-      const cuotas = p.cuotas ?? [];
-      return s + cuotas
-        .filter((c: any) => c.estado !== 'pagada')
-        .reduce((cs: number, c: any) => cs + Number(c.capital), 0);
-    }, 0);
+    const cuotas_vencidas = prestamos.reduce((s: number, p: any) =>
+      s + (p.cuotas ?? []).filter((c: any) => c.estado === 'vencida').length, 0);
 
-    const cuotas_vencidas = prestamos.reduce((s: number, p: any) => {
-      return s + (p.cuotas ?? []).filter((c: any) => c.estado === 'vencida').length;
-    }, 0);
-    const cuotas_total_pendientes = prestamos.reduce((s: number, p: any) => {
-      return s + (p.cuotas ?? []).filter((c: any) => c.estado !== 'pagada').length;
-    }, 0);
+    const total_interes_proyectado = activosList.reduce((s: number, p: any) =>
+      s + (p.cuotas ?? []).reduce((cs: number, c: any) => cs + Number(c.interes), 0), 0);
 
-    // Rentabilidad — sólo sobre cartera activa
-    const total_interes_proyectado = activosList.reduce((s: number, p: any) => {
-      return s + (p.cuotas ?? []).reduce((cs: number, c: any) => cs + Number(c.interes), 0);
-    }, 0);
-
-    const total_a_recuperar = activosList.reduce((s: number, p: any) => {
-      return s + (p.cuotas ?? []).reduce((cs: number, c: any) => cs + Number(c.monto_total), 0);
-    }, 0);
+    const total_a_recuperar = activosList.reduce((s: number, p: any) =>
+      s + (p.cuotas ?? []).reduce((cs: number, c: any) => cs + Number(c.monto_total), 0), 0);
 
     const total_recuperado = activosList.reduce((s: number, p: any) => {
       const cuotasPagadas = (p.cuotas ?? []).filter((c: any) => c.estado === 'pagada');
-      return s + cuotasPagadas.reduce((cs: number, c: any) => cs + Number(c.capital) + Number(c.interes), 0);
-    }, 0);
-
-    const total_mora_cobrada = prestamos.reduce((s: number, p: any) => {
-      return s + (p.cuotas ?? []).reduce((cs: number, c: any) => {
-        const pags = c.pagos ?? [];
-        return cs + pags.reduce((ps: number, pg: any) => ps + Number(pg.mora_cobrada ?? 0), 0);
-      }, 0);
+      const cobradoCuotas = cuotasPagadas.reduce((cs: number, c: any) => cs + Number(c.capital) + Number(c.interes), 0);
+      const cobradoAbonos = (p.abonos_capital ?? []).filter((a: any) => !a.anulado).reduce((cs: number, a: any) => cs + Number(a.monto_abono), 0);
+      return s + cobradoCuotas + cobradoAbonos;
     }, 0);
 
     return {
@@ -180,13 +152,10 @@ export const reportesService = {
       vencidos,
       monto_total_cartera:      Math.round(monto_total * 100) / 100,
       monto_por_cobrar:         Math.round(monto_cobrar * 100) / 100,
-      tasa_mora:                cuotas_total_pendientes > 0
-                                  ? Math.round((cuotas_vencidas / cuotas_total_pendientes) * 10000) / 100
-                                  : 0,
+      cuotas_vencidas,
       total_interes_proyectado: Math.round(total_interes_proyectado * 100) / 100,
       total_a_recuperar:        Math.round(total_a_recuperar * 100) / 100,
       total_recuperado:         Math.round(total_recuperado * 100) / 100,
-      total_mora_cobrada:       Math.round(total_mora_cobrada * 100) / 100,
       rentabilidad_global:      monto_total > 0
                                   ? Math.round((total_interes_proyectado / monto_total) * 10000) / 100
                                   : 0,
@@ -194,59 +163,61 @@ export const reportesService = {
   },
 
   async getMorosos(): Promise<ClienteMoroso[]> {
+    // Query directly from overdue cuotas so ALL clients with real vencida cuotas appear,
+    // regardless of whether their cliente.estado flag has been updated to 'moroso'.
     const { data, error } = await supabase
-      .from('clientes')
+      .from('cuotas')
       .select(`
-        id, nombre, apellido, documento_numero, telefono,
+        id, monto_total,
         prestamos(
           id, estado,
-          cuotas(id, estado, monto_total, fecha_vencimiento)
+          clientes(id, nombre, apellido, documento_numero, telefono)
         )
       `)
-      .eq('estado', 'moroso');
+      .eq('estado', 'vencida');
     if (error) throw error;
 
-    const hoy = new Date();
+    const clienteMap = new Map<string, {
+      cliente_id: string; nombre: string; apellido: string;
+      documento: string; telefono: string;
+      cuotas_vencidas: number; monto_vencido: number;
+      prestamoIds: Set<string>;
+    }>();
 
-    return (data ?? []).map((cl: any) => {
-      const prestamos = cl.prestamos ?? [];
-      const cuotasVencidas = prestamos
-        .filter((p: any) => p.estado === 'activo')
-        .flatMap((p: any) => (p.cuotas ?? []).filter((c: any) => c.estado === 'vencida'));
+    for (const cuota of (data ?? []) as any[]) {
+      const prestamo = cuota.prestamos;
+      if (!prestamo || !['activo', 'vencido'].includes(prestamo.estado)) continue;
+      const cl = prestamo.clientes;
+      if (!cl) continue;
 
-      const monto_vencido = cuotasVencidas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
-      const mora_total = cuotasVencidas.reduce((s: number, c: any) => {
-        const venc = new Date(c.fecha_vencimiento);
-        const dias = Math.max(0, Math.floor((hoy.getTime() - venc.getTime()) / 86400000));
-        return s + Number(c.monto_total) * 0.001 * dias;
-      }, 0);
+      if (!clienteMap.has(cl.id)) {
+        clienteMap.set(cl.id, {
+          cliente_id: cl.id,
+          nombre: cl.nombre,
+          apellido: cl.apellido,
+          documento: cl.documento_numero,
+          telefono: cl.telefono,
+          cuotas_vencidas: 0,
+          monto_vencido: 0,
+          prestamoIds: new Set(),
+        });
+      }
+      const entry = clienteMap.get(cl.id)!;
+      entry.cuotas_vencidas++;
+      entry.monto_vencido = Math.round((entry.monto_vencido + Number(cuota.monto_total)) * 100) / 100;
+      entry.prestamoIds.add(prestamo.id);
+    }
 
-      const dias_mayor_mora = cuotasVencidas.reduce((max: number, c: any) => {
-        const dias = Math.floor((hoy.getTime() - new Date(c.fecha_vencimiento).getTime()) / 86400000);
-        return Math.max(max, dias);
-      }, 0);
-
-      return {
-        cliente_id: cl.id,
-        nombre: cl.nombre,
-        apellido: cl.apellido,
-        documento: cl.documento_numero,
-        telefono: cl.telefono,
-        cuotas_vencidas: cuotasVencidas.length,
-        monto_vencido: Math.round(monto_vencido * 100) / 100,
-        mora_total: Math.round(mora_total * 100) / 100,
-        dias_mayor_mora,
-        prestamos_activos: prestamos.filter((p: any) => p.estado === 'activo').length,
-      };
-    }).filter((c: ClienteMoroso) => c.cuotas_vencidas > 0)
-      .sort((a: ClienteMoroso, b: ClienteMoroso) => b.dias_mayor_mora - a.dias_mayor_mora);
+    return Array.from(clienteMap.values())
+      .map(({ prestamoIds, ...rest }) => ({ ...rest, prestamos_activos: prestamoIds.size }))
+      .sort((a, b) => b.monto_vencido - a.monto_vencido);
   },
 
   async generarHtmlReporte(tipo: 'cartera' | 'morosos', data: any[], resumen?: ResumenCartera): Promise<string> {
     const fecha = new Date().toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' });
     let cfg: Configuracion;
     try { cfg = await configuracionService.get(); }
-    catch { cfg = { id: '', nombre_empresa: 'PRÉSTAMOS AB', moneda: 'Bs', simbolo_moneda: '$', tasa_mora_diaria: 0.001, tasa_mora_label: '0.1% diario', dias_gracia: 0, color_primario: '#0D1B2A', updated_at: '' }; }
+    catch { cfg = { id: '', nombre_empresa: 'PRÉSTAMOS AB', moneda: 'Bs', simbolo_moneda: '$', color_primario: '#0D1B2A', updated_at: '' }; }
 
     const s       = cfg.simbolo_moneda;
     const empresa = cfg.nombre_empresa;
@@ -301,7 +272,7 @@ export const reportesService = {
           <td style="text-align:right;font-weight:700">${s}${p.total_a_cobrar.toLocaleString('es')}</td>
           <td style="text-align:right;color:#0369a1">${s}${p.total_cobrado.toLocaleString('es')}</td>
           <td style="text-align:right">${s}${p.saldo_pendiente.toLocaleString('es')}</td>
-          <td style="text-align:center">${p.tasa_mensual}%</td>
+          <td style="text-align:center">${(p.tasa_mensual * 100).toFixed(2)}%</td>
           <td style="text-align:center;color:#7c3aed;font-weight:700">+${p.rentabilidad}%</td>
           <td style="text-align:center">${p.cuotas_pagadas}/${p.cuotas_total}</td>
           <td>${p.garantia_tipo}</td>
@@ -354,6 +325,7 @@ export const reportesService = {
         <div class="kpi"><div class="kpi-value">${s}${(resumen?.monto_total_cartera ?? 0).toLocaleString('es')}</div><div class="kpi-label">Capital Prestado</div></div>
         <div class="kpi"><div class="kpi-value green">${s}${(resumen?.total_interes_proyectado ?? 0).toLocaleString('es')}</div><div class="kpi-label">Intereses Proyectados</div></div>
         <div class="kpi"><div class="kpi-value">${s}${(resumen?.total_a_recuperar ?? 0).toLocaleString('es')}</div><div class="kpi-label">Total a Recuperar</div></div>
+        <div class="kpi"><div class="kpi-value">${resumen?.cuotas_vencidas ?? 0}</div><div class="kpi-label">Cuotas Vencidas</div></div>
         <div class="kpi"><div class="kpi-value purple">+${resumen?.rentabilidad_global ?? 0}%</div><div class="kpi-label">Rendimiento Global</div></div>
       </div>
       <table>
@@ -382,9 +354,8 @@ export const reportesService = {
         <td>${m.documento}</td>
         <td>${m.telefono}</td>
         <td style="text-align:center;color:#dc2626;font-weight:700">${m.cuotas_vencidas}</td>
-        <td style="text-align:right;color:#dc2626">${s}${m.monto_vencido.toLocaleString('es')}</td>
-        <td style="text-align:right;color:#b45309">${s}${m.mora_total.toFixed(2)}</td>
-        <td style="text-align:center;font-weight:700">${m.dias_mayor_mora} días</td>
+        <td style="text-align:right;color:#dc2626;font-weight:700">${s}${m.monto_vencido.toLocaleString('es')}</td>
+        <td style="text-align:center">${m.prestamos_activos}</td>
       </tr>
     `).join('');
 
@@ -411,7 +382,7 @@ export const reportesService = {
     <div class="sub">Generado el ${fecha}</div>
     <div class="alerta">Total de clientes en mora: ${data.length}</div>
     <table>
-      <thead><tr><th>Cliente</th><th>Documento</th><th>Teléfono</th><th>Cuotas Vencidas</th><th>Monto Vencido</th><th>Mora</th><th>Mayor Mora</th></tr></thead>
+      <thead><tr><th>Cliente</th><th>Documento</th><th>Teléfono</th><th>Cuotas Vencidas</th><th>Monto Vencido</th><th>Préstamos Activos</th></tr></thead>
       <tbody>${filas}</tbody>
     </table>
     <div class="footer">${empresa}${cfg.ruc_nit ? ` · RUC/NIT: ${cfg.ruc_nit}` : ''} · ${fecha}</div>

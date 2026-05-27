@@ -4,13 +4,12 @@ export interface DashboardStatsReal {
   cartera_total: number;
   prestamos_activos: number;
   cuotas_vencidas: number;
-  /** Total cobrado este mes (capital + intereses + mora) — métrica de flujo de caja */
+  /** Total cobrado este mes (capital + intereses) */
   ingresos_mes: number;
-  /** Solo intereses + mora + comisiones del mes — ingreso contable real */
+  /** Solo intereses + comisiones del mes — ingreso contable real */
   ingresos_contables_mes: number;
   cobros_hoy: number;
   cuotas_pendientes_hoy: number;
-  en_mora: number;
   /** Ingresos contables − egresos del mes */
   utilidad_mes: number;
   clientes_activos: number;
@@ -19,7 +18,7 @@ export interface DashboardStatsReal {
 
 export interface ActividadReciente {
   id: string;
-  tipo: 'pago' | 'prestamo' | 'cliente' | 'mora';
+  tipo: 'pago' | 'prestamo' | 'cliente';
   descripcion: string;
   monto?: number;
   fecha: string;
@@ -27,63 +26,72 @@ export interface ActividadReciente {
 
 export const dashboardService = {
   async getStats(): Promise<DashboardStatsReal> {
-    const hoy = new Date().toISOString().split('T')[0];
-    const inicioMes = new Date();
-    inicioMes.setDate(1);
-    const desdeMes = inicioMes.toISOString().split('T')[0];
+    // Use local calendar date — fecha_vencimiento and fecha_pago are stored as local dates
+    const now = new Date();
+    const hoy = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const desdeMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    // First day of next month — used for range filter on v_estado_resultados (view column is a timestamp)
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const hastaMes = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
+    // First day of tomorrow — upper bound for "today only" filters on timestamp columns
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const manana = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
 
     const [
       carteraRes, activosRes, vencidasRes,
-      cobrosHoyRes, pendientesHoyRes, moraRes,
+      cobrosHoyRes, pendientesHoyRes,
       ingresosRes, clientesRes, garantiasRes,
       resultadoMesRes,
+      abonosHoyRes, abonosMesRes,
     ] = await withTimeout(Promise.all([
       supabase.from('prestamos').select('monto_principal').eq('estado', 'activo'),
       supabase.from('prestamos').select('id', { count: 'exact' }).eq('estado', 'activo'),
       supabase.from('cuotas').select('id', { count: 'exact' }).eq('estado', 'vencida'),
-      supabase.from('pagos').select('monto_pagado').gte('fecha_pago', hoy),
+      supabase.from('pagos').select('monto_pagado').gte('fecha_pago', hoy).eq('anulado', false),
       supabase.from('cuotas').select('id', { count: 'exact' })
         .eq('estado', 'pendiente').eq('fecha_vencimiento', hoy),
-      supabase.from('cuotas').select('id', { count: 'exact' })
-        .eq('estado', 'vencida').gt('fecha_vencimiento', '2000-01-01'),
-      supabase.from('pagos').select('monto_pagado, mora_cobrada')
-        .gte('fecha_pago', desdeMes),
+      supabase.from('pagos').select('monto_pagado')
+        .gte('fecha_pago', desdeMes).eq('anulado', false),
       supabase.from('clientes').select('id', { count: 'exact' }).eq('estado', 'activo'),
       supabase.from('garantias').select('id', { count: 'exact' }).eq('estado', 'en_garantia'),
-      // Vista contable del mes actual para ingresos y utilidad reales
-      supabase.from('v_estado_resultados').select('*').eq('mes', desdeMes).maybeSingle(),
+      supabase.from('v_estado_resultados').select('*').gte('mes', desdeMes).lt('mes', hastaMes).maybeSingle(),
+      // Abonos a capital (cobro de capital extraordinario que no pasa por la tabla pagos)
+      // abonosHoyRes: solo los del día de hoy (lt manana) y no anulados
+      supabase.from('abonos_capital').select('monto_abono').gte('created_at', hoy).lt('created_at', manana).eq('anulado', false),
+      // abonosMesRes: solo los del mes en curso y no anulados
+      supabase.from('abonos_capital').select('monto_abono').gte('created_at', desdeMes).lt('created_at', hastaMes).eq('anulado', false),
     ]));
 
     const cartera_total = (carteraRes.data ?? [])
       .reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
 
-    const cobros_hoy = (cobrosHoyRes.data ?? [])
-      .reduce((s: number, p: any) => s + Number(p.monto_pagado), 0);
+    const cobros_hoy_pagos   = (cobrosHoyRes.data ?? []).reduce((s: number, p: any) => s + Number(p.monto_pagado), 0);
+    const cobros_hoy_abonos  = (abonosHoyRes.data ?? []).reduce((s: number, a: any) => s + Number(a.monto_abono), 0);
+    const cobros_hoy         = cobros_hoy_pagos + cobros_hoy_abonos;
 
-    // Total cobrado en el mes (capital + intereses + mora) — flujo de caja
-    const total_cobrado_mes = (ingresosRes.data ?? [])
-      .reduce((s: number, p: any) => s + Number(p.monto_pagado), 0);
+    // Total cobrado en el mes (capital + intereses + mora + abonos a capital) — flujo de caja
+    const total_cobrado_mes =
+      (ingresosRes.data ?? []).reduce((s: number, p: any) => s + Number(p.monto_pagado), 0) +
+      (abonosMesRes.data ?? []).reduce((s: number, a: any) => s + Number(a.monto_abono), 0);
 
-    // Ingresos y utilidad contables reales desde la vista v_estado_resultados
     const rm = (resultadoMesRes as any).data;
     const ingresos_contables_mes = rm
-      ? Math.round(((rm.ingresos_intereses ?? 0) + (rm.ingresos_mora ?? 0) + (rm.ingresos_comisiones ?? 0)) * 100) / 100
+      ? Math.round(((rm.ingresos_intereses ?? 0) + (rm.ingresos_comisiones ?? 0)) * 100) / 100
       : 0;
     const utilidad_mes = rm
       ? Math.round((rm.utilidad_neta ?? 0) * 100) / 100
       : 0;
 
     return {
-      cartera_total: Math.round(cartera_total * 100) / 100,
-      prestamos_activos: activosRes.count ?? 0,
-      cuotas_vencidas: vencidasRes.count ?? 0,
-      ingresos_mes: Math.round(total_cobrado_mes * 100) / 100,
+      cartera_total:         Math.round(cartera_total * 100) / 100,
+      prestamos_activos:     activosRes.count ?? 0,
+      cuotas_vencidas:       vencidasRes.count ?? 0,
+      ingresos_mes:          Math.round(total_cobrado_mes * 100) / 100,
       ingresos_contables_mes,
-      cobros_hoy: Math.round(cobros_hoy * 100) / 100,
+      cobros_hoy:            Math.round(cobros_hoy * 100) / 100,
       cuotas_pendientes_hoy: pendientesHoyRes.count ?? 0,
-      en_mora: moraRes.count ?? 0,
       utilidad_mes,
-      clientes_activos: clientesRes.count ?? 0,
+      clientes_activos:      clientesRes.count ?? 0,
       garantias_en_custodia: garantiasRes.count ?? 0,
     };
   },
@@ -93,6 +101,7 @@ export const dashboardService = {
       supabase
         .from('pagos')
         .select(`id, monto_pagado, fecha_pago, cuotas(prestamo_id, prestamos(clientes(nombre, apellido)))`)
+        .eq('anulado', false)
         .order('fecha_pago', { ascending: false })
         .limit(4),
       supabase
@@ -148,10 +157,10 @@ export const dashboardService = {
   },
 
   async getAlerts(): Promise<{ tipo: 'danger' | 'warning' | 'info'; icon: string; mensaje: string }[]> {
-    const hoy = new Date().toISOString().split('T')[0];
-    const en3dias = new Date();
-    en3dias.setDate(en3dias.getDate() + 3);
-    const hasta = en3dias.toISOString().split('T')[0];
+    const now = new Date();
+    const hoy = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const en3diasDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+    const hasta = `${en3diasDate.getFullYear()}-${String(en3diasDate.getMonth() + 1).padStart(2, '0')}-${String(en3diasDate.getDate()).padStart(2, '0')}`;
 
     const [vencidasRes, proxRes] = await Promise.all([
       supabase.from('cuotas').select('id', { count: 'exact' }).eq('estado', 'vencida'),

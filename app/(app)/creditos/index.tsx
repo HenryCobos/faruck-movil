@@ -4,6 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { prestamosService } from '@/services/prestamos.service';
+import { parseFechaLocal } from '@/utils/amortizacion';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
@@ -27,26 +28,42 @@ const TIPO_ICON: Record<string, string> = {
 function PrestamoCard({ item }: { item: any }) {
   const cliente = item.clientes;
   const garantia = item.garantias;
+  const esProducto = item.tipo_prestamo === 'credito_producto';
   return (
     <TouchableOpacity
-      style={[styles.card, item.estado === 'vencido' && styles.cardVencido]}
+      style={[styles.card, item.estado === 'vencido' && styles.cardVencido, esProducto && styles.cardProducto]}
       onPress={() => router.push(`/(app)/creditos/${item.id}` as any)}
       activeOpacity={0.7}
     >
       <View style={styles.cardTop}>
-        <View>
-          <Text style={styles.cardAmount}>${item.monto_principal?.toLocaleString('es')}</Text>
-          <Text style={styles.cardClient}>{cliente?.nombre} {cliente?.apellido}</Text>
+        <View style={{ flex: 1, marginRight: 8 }}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardAmount}>${item.monto_principal?.toLocaleString('es')}</Text>
+            {esProducto && (
+              <View style={styles.tipoBadge}>
+                <Text style={styles.tipoBadgeText}>🏷️ Producto</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.cardClient}>
+            {cliente?.nombre} {cliente?.apellido}
+            {!!cliente?.alias && <Text style={styles.cardAlias}> · {cliente.alias}</Text>}
+          </Text>
+          {esProducto && item.descripcion_producto ? (
+            <Text style={styles.cardProductDesc} numberOfLines={1}>{item.descripcion_producto}</Text>
+          ) : null}
         </View>
         <Badge label={ESTADO_LABEL[item.estado] ?? item.estado} variant={ESTADO_VARIANT[item.estado] ?? 'default'} />
       </View>
       <View style={styles.cardBottom}>
         <Text style={styles.cardDetail}>
-          {garantia && `${TIPO_ICON[garantia.tipo] ?? '📦'} ${garantia.tipo}`} · {item.plazo_meses} meses · {(item.tasa_mensual * 100).toFixed(1)}% mes
+          {esProducto
+            ? `${item.plazo_meses} cuota(s) · sin interés`
+            : `${garantia ? `${TIPO_ICON[garantia.tipo] ?? '📦'} ${garantia.tipo} · ` : ''}${item.plazo_meses} meses · ${(item.tasa_mensual * 100).toFixed(1)}% mes`}
         </Text>
         <Text style={styles.cardDate}>
           {item.fecha_desembolso
-            ? new Date(item.fecha_desembolso).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' })
+            ? parseFechaLocal(item.fecha_desembolso).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' })
             : new Date(item.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
         </Text>
       </View>
@@ -72,17 +89,25 @@ export default function CreditosListScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   // El filtrado se recalcula siempre que cambien los datos O el filtro/búsqueda
   React.useEffect(() => {
     let r = prestamos;
     if (filtroEstado !== 'todos') r = r.filter(p => p.estado === filtroEstado);
-    if (search) r = r.filter(p =>
-      p.clientes?.nombre?.toLowerCase().includes(search.toLowerCase()) ||
-      p.clientes?.apellido?.toLowerCase().includes(search.toLowerCase()) ||
-      p.clientes?.documento_numero?.includes(search)
-    );
+    if (search) {
+      const q = search.toLowerCase();
+      r = r.filter(p =>
+        p.clientes?.nombre?.toLowerCase().includes(q) ||
+        p.clientes?.apellido?.toLowerCase().includes(q) ||
+        p.clientes?.alias?.toLowerCase().includes(q) ||
+        p.clientes?.documento_numero?.includes(search)
+      );
+    }
     setFiltered(r);
   }, [prestamos, filtroEstado, search]);
 
@@ -106,9 +131,14 @@ export default function CreditosListScreen() {
             <Text style={styles.headerTitle}>Créditos</Text>
             <Text style={styles.headerSub}>{prestamos.length} registrados</Text>
           </View>
-          <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/(app)/creditos/nuevo')}>
-            <Text style={styles.addBtnText}>+ Nuevo</Text>
-          </TouchableOpacity>
+          <View style={styles.addBtns}>
+            <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/(app)/creditos/nuevo')}>
+              <Text style={styles.addBtnText}>+ Préstamo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.addBtn, styles.addBtnProducto]} onPress={() => router.push('/(app)/creditos/nuevo-producto' as any)}>
+              <Text style={styles.addBtnText}>🏷️ Producto</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={styles.statsRow}>
           <View style={styles.statChip}>
@@ -158,8 +188,10 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 12 },
   headerTitle: { fontSize: 22, fontWeight: '800', color: Colors.white },
   headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
-  addBtn: { backgroundColor: Colors.accent, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
-  addBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
+  addBtns: { flexDirection: 'row', gap: 8 },
+  addBtn: { backgroundColor: Colors.accent, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  addBtnProducto: { backgroundColor: Colors.primary },
+  addBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   statChip: { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10, padding: 10, alignItems: 'center' },
   statVal: { fontSize: 18, fontWeight: '800', color: Colors.accent },
@@ -179,7 +211,18 @@ const styles = StyleSheet.create({
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardAmount: { fontSize: 20, fontWeight: '800', color: Colors.text },
   cardClient: { fontSize: 13, color: Colors.muted, marginTop: 2 },
+  cardAlias: { fontSize: 12, color: Colors.primary, fontWeight: '600', fontStyle: 'italic' },
   cardBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardDetail: { fontSize: 12, color: Colors.muted, textTransform: 'capitalize' },
   cardDate: { fontSize: 11, color: Colors.muted },
+  cardProducto: { borderLeftWidth: 3, borderLeftColor: Colors.accent },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  tipoBadge: {
+    backgroundColor: Colors.accent + '20',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  tipoBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.accent },
+  cardProductDesc: { fontSize: 12, color: Colors.muted, marginTop: 2, fontStyle: 'italic' },
 });

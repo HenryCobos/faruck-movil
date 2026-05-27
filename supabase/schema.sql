@@ -1,6 +1,11 @@
 -- ============================================================
 -- PIGNORA APP — Schema de base de datos en Supabase
 -- Ejecutar en el SQL Editor de tu proyecto Supabase
+--
+-- IMPORTANTE: solo en base de datos NUEVA / vacía. Si ya existe
+-- user_role, tablas, etc., NO ejecutes este archivo otra vez:
+-- obtendrás errores "already exists". Usa los scripts incrementales
+-- (add_*.sql, fix_warnings.sql, patch_*.sql) para actualizar.
 -- ============================================================
 
 -- Habilitar extensiones necesarias

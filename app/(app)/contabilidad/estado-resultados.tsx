@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl,
   Alert, Modal, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -204,7 +204,7 @@ interface MesCardProps {
 }
 
 function MesCard({ item, maxIngresos, prev, flow }: MesCardProps) {
-  const totalIngresos = item.ingresos_intereses + item.ingresos_comisiones + item.ingresos_mora;
+  const totalIngresos = item.ingresos_intereses + item.ingresos_comisiones;
   const margen = totalIngresos > 0 ? Math.round((item.utilidad_neta / totalIngresos) * 100) : 0;
   const utilPos = item.utilidad_neta >= 0;
 
@@ -213,7 +213,6 @@ function MesCard({ item, maxIngresos, prev, flow }: MesCardProps) {
     : null;
 
   const pctI  = totalIngresos > 0 ? Math.round(item.ingresos_intereses  / totalIngresos * 100) : 0;
-  const pctM  = totalIngresos > 0 ? Math.round(item.ingresos_mora        / totalIngresos * 100) : 0;
   const pctC  = totalIngresos > 0 ? Math.round(item.ingresos_comisiones  / totalIngresos * 100) : 0;
 
   return (
@@ -239,7 +238,6 @@ function MesCard({ item, maxIngresos, prev, flow }: MesCardProps) {
       <View style={styles.mesGrid}>
         {[
           { label: 'Intereses',   value: item.ingresos_intereses,  pct: pctI, color: Colors.success },
-          { label: 'Mora',        value: item.ingresos_mora,        pct: pctM, color: Colors.warning },
           { label: 'Comisiones',  value: item.ingresos_comisiones,  pct: pctC, color: Colors.info },
           { label: 'Egresos',     value: item.egresos,              pct: null, color: Colors.danger },
         ].map(({ label, value, pct, color }) => (
@@ -292,7 +290,7 @@ function MesCard({ item, maxIngresos, prev, flow }: MesCardProps) {
 }
 
 interface ResumenAnualProps {
-  totales: { intereses: number; comisiones: number; mora: number; egresos: number; utilidad: number };
+  totales: { intereses: number; comisiones: number; egresos: number; utilidad: number };
   margenAnual: number;
   mejorMes: EstadoResultados | null;
   totalCapitalFlow: { desplegado: number; recuperado: number };
@@ -300,7 +298,7 @@ interface ResumenAnualProps {
 }
 
 function ResumenHeader({ totales, margenAnual, mejorMes, totalCapitalFlow, rango }: ResumenAnualProps) {
-  const totalIngresos = totales.intereses + totales.comisiones + totales.mora;
+  const totalIngresos = totales.intereses + totales.comisiones;
   return (
     <View style={styles.resumenAnual}>
       <Text style={styles.resumenTitle}>{rango.toUpperCase()}</Text>
@@ -313,11 +311,10 @@ function ResumenHeader({ totales, margenAnual, mejorMes, totalCapitalFlow, rango
       </View>
       <View style={styles.resumenGrid}>
         {[
-          { val: totales.intereses,  label: 'Intereses',        color: '#6ee7b7' },
-          { val: totales.mora,       label: 'Mora cobrada',     color: '#fcd34d' },
-          { val: totales.comisiones, label: 'Comisiones',       color: '#93c5fd' },
-          { val: totales.egresos,    label: 'Egresos totales',  color: '#fca5a5' },
-          { val: totalIngresos,      label: 'Total ingresos',   color: '#d8b4fe' },
+          { val: totales.intereses,  label: 'Intereses',       color: '#6ee7b7' },
+          { val: totales.comisiones, label: 'Comisiones',      color: '#93c5fd' },
+          { val: totales.egresos,    label: 'Egresos totales', color: '#fca5a5' },
+          { val: totalIngresos,      label: 'Total ingresos',  color: '#d8b4fe' },
         ].map(({ val, label, color }) => (
           <View key={label} style={styles.resumenItem}>
             <Text style={[styles.resumenValue, { color }]}>{formatCurrency(val)}</Text>
@@ -385,13 +382,17 @@ export default function EstadoResultadosScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, [chip, anioSel, custom]);
 
-  useEffect(() => { load(); }, [chip, anioSel, custom]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const applyCustom = (r: Rango) => {
     setCustom(r);
     setChip('CUSTOM');
     setShowPicker(false);
-    // useEffect will re-fetch via dependency on custom
+    // useFocusEffect + load() dependen de custom; al cambiar el rango se vuelve a pedir datos
   };
 
   const exportarPDF = async () => {
@@ -414,18 +415,17 @@ export default function EstadoResultadosScreen() {
   if (loading) return <LoadingScreen label="Cargando estado de resultados..." />;
 
   const maxIngresos = Math.max(...data.map(d =>
-    d.ingresos_intereses + d.ingresos_comisiones + d.ingresos_mora
+    d.ingresos_intereses + d.ingresos_comisiones
   ), 1);
 
   const totales = data.reduce((acc, d) => ({
     intereses:  acc.intereses  + d.ingresos_intereses,
     comisiones: acc.comisiones + d.ingresos_comisiones,
-    mora:       acc.mora       + d.ingresos_mora,
     egresos:    acc.egresos    + d.egresos,
     utilidad:   acc.utilidad   + d.utilidad_neta,
-  }), { intereses: 0, comisiones: 0, mora: 0, egresos: 0, utilidad: 0 });
+  }), { intereses: 0, comisiones: 0, egresos: 0, utilidad: 0 });
 
-  const totalIngresos = totales.intereses + totales.comisiones + totales.mora;
+  const totalIngresos = totales.intereses + totales.comisiones;
   const margenAnual   = totalIngresos > 0 ? Math.round(totales.utilidad / totalIngresos * 100) : 0;
   const mejorMes      = data.length > 0 ? data.reduce((b, d) => d.utilidad_neta > b.utilidad_neta ? d : b) : null;
 
@@ -440,7 +440,7 @@ export default function EstadoResultadosScreen() {
       {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/contabilidad')} style={styles.backBtn}>
             <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Estado de Resultados</Text>

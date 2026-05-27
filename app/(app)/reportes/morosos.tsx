@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   RefreshControl, Alert, Linking,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -15,9 +15,6 @@ import { formatCurrency } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
 
 function MorosoCard({ item, nombreEmpresa }: { item: ClienteMoroso; nombreEmpresa: string }) {
-  const riesgo = item.dias_mayor_mora >= 30 ? 'alto' : item.dias_mayor_mora >= 15 ? 'medio' : 'bajo';
-  const riesgoColor = { alto: Colors.danger, medio: Colors.warning, bajo: Colors.info }[riesgo];
-
   const llamar = () => {
     if (item.telefono) Linking.openURL(`tel:${item.telefono}`).catch(() => {});
   };
@@ -27,16 +24,13 @@ function MorosoCard({ item, nombreEmpresa }: { item: ClienteMoroso; nombreEmpres
   };
 
   return (
-    <View style={[styles.card, { borderLeftColor: riesgoColor, borderLeftWidth: 3 }]}>
+    <View style={[styles.card, { borderLeftColor: Colors.danger, borderLeftWidth: 3 }]}>
       <View style={styles.cardHeader}>
         <View style={styles.avatarWrap}>
-          <View style={[styles.avatar, { backgroundColor: `${riesgoColor}20` }]}>
-            <Text style={[styles.avatarText, { color: riesgoColor }]}>
+          <View style={[styles.avatar, { backgroundColor: `${Colors.danger}20` }]}>
+            <Text style={[styles.avatarText, { color: Colors.danger }]}>
               {item.nombre[0]}{item.apellido[0]}
             </Text>
-          </View>
-          <View style={[styles.riesgoBadge, { backgroundColor: `${riesgoColor}20` }]}>
-            <Text style={[styles.riesgoText, { color: riesgoColor }]}>RIESGO {riesgo.toUpperCase()}</Text>
           </View>
         </View>
         <View style={styles.headerActions}>
@@ -62,18 +56,14 @@ function MorosoCard({ item, nombreEmpresa }: { item: ClienteMoroso; nombreEmpres
           <Text style={styles.statLabel}>Monto vencido</Text>
         </View>
         <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: Colors.warning }]}>{formatCurrency(item.mora_total)}</Text>
-          <Text style={styles.statLabel}>Mora calculada</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: riesgoColor }]}>{item.dias_mayor_mora}</Text>
-          <Text style={styles.statLabel}>Días mayor mora</Text>
+          <Text style={[styles.statValue, { color: Colors.muted }]}>{item.prestamos_activos}</Text>
+          <Text style={styles.statLabel}>Préstamos activos</Text>
         </View>
       </View>
 
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel}>TOTAL A REGULARIZAR</Text>
-        <Text style={styles.totalValue}>{formatCurrency(item.monto_vencido + item.mora_total)}</Text>
+        <Text style={styles.totalValue}>{formatCurrency(item.monto_vencido)}</Text>
       </View>
     </View>
   );
@@ -99,7 +89,11 @@ export default function MorososScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const exportarPDF = async () => {
     setExporting(true);
@@ -120,14 +114,13 @@ export default function MorososScreen() {
 
   if (loading) return <LoadingScreen label="Cargando clientes morosos..." />;
 
-  const totalMora = data.reduce((s, c) => s + c.mora_total, 0);
   const totalVencido = data.reduce((s, c) => s + c.monto_vencido, 0);
 
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/reportes')} style={styles.backBtn}>
             <Text style={styles.backIcon}>←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Clientes Morosos</Text>
@@ -139,12 +132,9 @@ export default function MorososScreen() {
         {data.length > 0 && (
           <View style={styles.alertCard}>
             <View style={styles.alertRow}>
-              <Text style={styles.alertLabel}>{data.length} clientes en mora</Text>
-              <Text style={styles.alertAmount}>{formatCurrency(totalVencido + totalMora)}</Text>
+              <Text style={styles.alertLabel}>{data.length} clientes con cuotas vencidas</Text>
+              <Text style={styles.alertAmount}>{formatCurrency(totalVencido)}</Text>
             </View>
-            <Text style={styles.alertSub}>
-              {formatCurrency(totalVencido)} vencido + {formatCurrency(totalMora)} mora
-            </Text>
           </View>
         )}
       </View>

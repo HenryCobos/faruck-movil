@@ -9,13 +9,11 @@ export interface CuotaPendiente {
   capital: number;
   interes: number;
   monto_total: number;
-  mora_acumulada: number;
-  mora_calculada: number;
-  dias_mora: number;
   estado: string;
   monto_principal: number;
   cliente_nombre: string;
   cliente_apellido: string;
+  cliente_alias?: string;
   cliente_telefono: string;
   cliente_documento: string;
   garantia_tipo: string;
@@ -27,21 +25,33 @@ export interface ResultadoPago {
   recibo_num: string;
   capital: number;
   interes: number;
-  mora: number;
   total: number;
   prestamo_cancelado: boolean;
+  saldo_pendiente: number;
 }
 
 export interface PagoRegistrado {
   id: string;
   cuota_id: string;
   monto_pagado: number;
-  mora_cobrada: number;
   fecha_pago: string;
   metodo_pago: string;
   numero_recibo: string;
   observaciones?: string;
   cajero_id: string;
+  anulado: boolean;
+  anulado_at?: string;
+  anulado_por?: string;
+  motivo_anulacion?: string;
+}
+
+export interface ResultadoAnulacion {
+  ok: boolean;
+  pago_id: string;
+  recibo: string;
+  cuota_nuevo_estado: string;
+  prestamo_revertido: boolean;
+  garantia_revertida: boolean;
 }
 
 export const cobrosService = {
@@ -50,7 +60,6 @@ export const cobrosService = {
       supabase
         .from('v_cuotas_pendientes')
         .select('*')
-        .order('dias_mora', { ascending: false })
         .order('fecha_vencimiento', { ascending: true }),
     );
     if (error) throw error;
@@ -71,17 +80,19 @@ export const cobrosService = {
     cuotaId: string;
     cajeroId: string;
     montoPagado: number;
-    moraCobrada: number;
     metodoPago: 'efectivo' | 'transferencia' | 'cheque';
     observaciones?: string;
+    /** Fecha a registrar en el recibo y en la base de datos. Por defecto: hoy. Formato YYYY-MM-DD */
+    fechaPago?: string;
   }): Promise<ResultadoPago> {
     const { data, error } = await supabase.rpc('registrar_pago', {
       p_cuota_id:      params.cuotaId,
       p_cajero_id:     params.cajeroId,
       p_monto_pagado:  params.montoPagado,
-      p_mora_cobrada:  params.moraCobrada,
+      p_mora_cobrada:  0,
       p_metodo_pago:   params.metodoPago,
       p_observaciones: params.observaciones ?? null,
+      p_fecha_pago:    params.fechaPago ?? null,
     });
     if (error) throw error;
     const resultado = data as ResultadoPago;
@@ -95,7 +106,6 @@ export const cobrosService = {
         recibo: resultado.recibo_num,
         capital: resultado.capital,
         interes: resultado.interes,
-        mora: resultado.mora,
         total: resultado.total,
         metodo: params.metodoPago,
       },
@@ -114,6 +124,20 @@ export const cobrosService = {
     return (data ?? []) as PagoRegistrado[];
   },
 
+  async anularPago(params: {
+    pagoId: string;
+    adminId: string;
+    motivo: string;
+  }): Promise<ResultadoAnulacion> {
+    const { data, error } = await supabase.rpc('revertir_pago', {
+      p_pago_id:  params.pagoId,
+      p_admin_id: params.adminId,
+      p_motivo:   params.motivo,
+    });
+    if (error) throw error;
+    return data as ResultadoAnulacion;
+  },
+
   async getPagoById(id: string): Promise<PagoRegistrado> {
     const { data, error } = await supabase
       .from('pagos')
@@ -124,11 +148,4 @@ export const cobrosService = {
     return data as PagoRegistrado;
   },
 
-  calcularMora(monto_total: number, fecha_vencimiento: string): number {
-    const hoy = new Date();
-    const venc = new Date(fecha_vencimiento);
-    if (hoy <= venc) return 0;
-    const dias = Math.floor((hoy.getTime() - venc.getTime()) / (1000 * 60 * 60 * 24));
-    return Math.round(monto_total * 0.001 * dias * 100) / 100;
-  },
 };

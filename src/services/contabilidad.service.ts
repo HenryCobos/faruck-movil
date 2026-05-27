@@ -19,7 +19,6 @@ export interface EstadoResultados {
   mes: string;
   ingresos_intereses: number;
   ingresos_comisiones: number;
-  ingresos_mora: number;
   egresos: number;
   utilidad_neta: number;
 }
@@ -36,7 +35,6 @@ export interface CapitalFlowMensual {
 
 export interface ResumenContable {
   ingresos_mes: number;
-  mora_mes: number;
   egresos_mes: number;
   utilidad_mes: number;
   cartera_vigente: number;
@@ -110,10 +108,6 @@ export const contabilidadService = {
       .filter((a: any) => a.plan_cuentas?.tipo === 'ingreso')
       .reduce((s: number, a: any) => s + Number(a.haber), 0);
 
-    const mora_mes = asientos
-      .filter((a: any) => a.plan_cuentas?.codigo === '4130')
-      .reduce((s: number, a: any) => s + Number(a.haber), 0);
-
     const egresos_mes = asientos
       .filter((a: any) => a.plan_cuentas?.tipo === 'egreso')
       .reduce((s: number, a: any) => s + Number(a.debe), 0);
@@ -127,7 +121,6 @@ export const contabilidadService = {
 
     return {
       ingresos_mes: Math.round(ingresos_mes * 100) / 100,
-      mora_mes: Math.round(mora_mes * 100) / 100,
       egresos_mes: Math.round(egresos_mes * 100) / 100,
       utilidad_mes: Math.round((ingresos_mes - egresos_mes) * 100) / 100,
       cartera_vigente: Math.round(cartera_vigente * 100) / 100,
@@ -158,13 +151,21 @@ export const contabilidadService = {
 
     let pagosQ = supabase.from('pagos')
       .select('fecha_pago, cuotas(capital, interes)')
+      .eq('anulado', false)
       .gte('fecha_pago', desdeStr);
     if (hastaExcl) pagosQ = pagosQ.lt('fecha_pago', hastaExcl);
 
-    const [prestamosRes, pagosRes] = await Promise.all([prestamosQ, pagosQ]);
+    // Abonos a capital: flujo de caja de capital extraordinario por mes
+    let abonosQ = supabase.from('abonos_capital')
+      .select('created_at, monto_abono')
+      .gte('created_at', desdeStr);
+    if (hastaExcl) abonosQ = abonosQ.lt('created_at', hastaExcl);
+
+    const [prestamosRes, pagosRes, abonosRes] = await Promise.all([prestamosQ, pagosQ, abonosQ]);
 
     if (prestamosRes.error) throw prestamosRes.error;
     if (pagosRes.error) throw pagosRes.error;
+    if (abonosRes.error) console.warn('capitalFlow abonos:', abonosRes.error.message);
 
     const mesKey = (d: string) => `${d.substring(0, 7)}-01`;
 
@@ -191,6 +192,12 @@ export const contabilidadService = {
       }
     }
 
+    // Abonos a capital contribuyen directamente a capital_recuperado (no a intereses)
+    for (const ab of abonosRes.data ?? []) {
+      const e = ensure(mesKey((ab as any).created_at));
+      e.capital_recuperado += Number((ab as any).monto_abono ?? 0);
+    }
+
     return Array.from(flowMap.values())
       .map(e => ({
         ...e,
@@ -212,7 +219,7 @@ export const contabilidadService = {
 
     let cfg: Configuracion;
     try { cfg = await configuracionService.get(); }
-    catch { cfg = { id: '', nombre_empresa: 'PRÉSTAMOS AB', moneda: 'Bs', simbolo_moneda: '$', tasa_mora_diaria: 0.001, tasa_mora_label: '0.1% diario', dias_gracia: 0, color_primario: '#0D1B2A', updated_at: '' }; }
+    catch { cfg = { id: '', nombre_empresa: 'PRÉSTAMOS AB', moneda: 'Bs', simbolo_moneda: '$', color_primario: '#0D1B2A', updated_at: '' }; }
 
     const s       = cfg.simbolo_moneda;
     const empresa = cfg.nombre_empresa;
@@ -251,16 +258,14 @@ export const contabilidadService = {
       return `${MESES[d.getMonth()]} ${d.getFullYear()}`;
     };
 
-    // Annual totals
     const totales = datos.reduce((acc, d) => ({
       intereses:   acc.intereses   + d.ingresos_intereses,
       comisiones:  acc.comisiones  + d.ingresos_comisiones,
-      mora:        acc.mora        + d.ingresos_mora,
       egresos:     acc.egresos     + d.egresos,
       utilidad:    acc.utilidad    + d.utilidad_neta,
-    }), { intereses: 0, comisiones: 0, mora: 0, egresos: 0, utilidad: 0 });
+    }), { intereses: 0, comisiones: 0, egresos: 0, utilidad: 0 });
 
-    const totalIngresos  = totales.intereses + totales.comisiones + totales.mora;
+    const totalIngresos  = totales.intereses + totales.comisiones;
     const margenAnual    = totalIngresos > 0 ? Math.round((totales.utilidad / totalIngresos) * 100) : 0;
     const mejorMes       = datos.reduce((best, d) => d.utilidad_neta > best.utilidad_neta ? d : best, datos[0] ?? { mes: '', utilidad_neta: 0 });
 
@@ -268,7 +273,7 @@ export const contabilidadService = {
 
     // Main table rows — newest first
     const filas = datos.map((d, i) => {
-      const ti = d.ingresos_intereses + d.ingresos_comisiones + d.ingresos_mora;
+      const ti = d.ingresos_intereses + d.ingresos_comisiones;
       const margen = ti > 0 ? Math.round((d.utilidad_neta / ti) * 100) : 0;
       const prev   = datos[i + 1];
       const mom    = prev && prev.utilidad_neta !== 0
@@ -283,7 +288,6 @@ export const contabilidadService = {
           <td style="font-weight:700">${mesLabel(d.mes)}</td>
           <td style="text-align:right;color:#0d9488">${s}${d.ingresos_intereses.toLocaleString('es')}</td>
           <td style="text-align:right;color:#0369a1">${s}${d.ingresos_comisiones.toLocaleString('es')}</td>
-          <td style="text-align:right;color:#b45309">${s}${d.ingresos_mora.toLocaleString('es')}</td>
           <td style="text-align:right">${s}${ti.toLocaleString('es')}</td>
           <td style="text-align:right;color:#dc2626">${s}${d.egresos.toLocaleString('es')}</td>
           <td style="text-align:right;font-weight:800;color:${d.utilidad_neta >= 0 ? '#0d9488' : '#dc2626'}">${s}${d.utilidad_neta.toLocaleString('es')}</td>
@@ -300,7 +304,6 @@ export const contabilidadService = {
         <td style="font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color}">TOTALES</td>
         <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color};color:#0d9488">${s}${totales.intereses.toLocaleString('es')}</td>
         <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color};color:#0369a1">${s}${totales.comisiones.toLocaleString('es')}</td>
-        <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color};color:#b45309">${s}${totales.mora.toLocaleString('es')}</td>
         <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color}">${s}${totalIngresos.toLocaleString('es')}</td>
         <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color};color:#dc2626">${s}${totales.egresos.toLocaleString('es')}</td>
         <td style="text-align:right;font-weight:900;border-top:2px solid ${color};border-bottom:2px solid ${color};color:${totales.utilidad >= 0 ? '#0d9488' : '#dc2626'}">${s}${totales.utilidad.toLocaleString('es')}</td>
@@ -333,7 +336,6 @@ export const contabilidadService = {
     <div class="kpis">
       <div class="kpi"><div class="kpi-value">${s}${totalIngresos.toLocaleString('es')}</div><div class="kpi-label">Ingresos Totales</div></div>
       <div class="kpi"><div class="kpi-value green">${s}${totales.intereses.toLocaleString('es')}</div><div class="kpi-label">Intereses</div></div>
-      <div class="kpi"><div class="kpi-value orange">${s}${totales.mora.toLocaleString('es')}</div><div class="kpi-label">Mora</div></div>
       <div class="kpi"><div class="kpi-value">${s}${totales.comisiones.toLocaleString('es')}</div><div class="kpi-label">Comisiones</div></div>
       <div class="kpi"><div class="kpi-value" style="color:${totales.utilidad >= 0 ? '#0d9488' : '#dc2626'}">${s}${totales.utilidad.toLocaleString('es')}</div><div class="kpi-label">Utilidad Total</div></div>
       <div class="kpi"><div class="kpi-value purple">${margenAnual}%</div><div class="kpi-label">Margen Anual</div></div>
@@ -345,7 +347,6 @@ export const contabilidadService = {
         <th>Mes</th>
         <th style="text-align:right">Intereses</th>
         <th style="text-align:right">Comisiones</th>
-        <th style="text-align:right">Mora</th>
         <th style="text-align:right">Total Ing.</th>
         <th style="text-align:right">Egresos</th>
         <th style="text-align:right">Utilidad</th>

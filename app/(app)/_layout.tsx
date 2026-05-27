@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Text, StyleSheet, View } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
 import { useAuthStore } from '@/stores/auth.store';
 import { Colors } from '@/constants/colors';
 import { UserRole } from '@/types';
@@ -46,7 +47,7 @@ const TAB_CONFIGS: Record<UserRole, TabConfig[]> = {
 const ALL_TAB_NAMES = [
   'creditos', 'clientes', 'garantias', 'reportes', 'cobros',
   'contabilidad', 'usuarios', 'auditoria', 'configuracion',
-  'perfil', 'informes', 'sistema',
+  'perfil', 'informes', 'sistema', 'cadenas', 'prestamos-personales',
 ] as const;
 
 function TabIcon({ icon, focused }: { icon: string; focused: boolean }) {
@@ -82,10 +83,16 @@ export default function AppLayout() {
           }}
           listeners={({ navigation }) => ({
             tabPress: (e) => {
-              // Cancelamos el comportamiento por defecto para evitar doble navegación.
-              // Siempre vuelve al index del stack (descarta modales como "nuevo").
               e.preventDefault();
-              navigation.navigate(tab.name, { screen: 'index' });
+              // Navegar al tab y resetear su stack interno al index.
+              // CommonActions.navigate con screen anidado hace pop-to-index
+              // de cualquier pantalla apilada (detalle, nuevo, renovar).
+              navigation.dispatch(
+                CommonActions.navigate({
+                  name: tab.name,
+                  params: { screen: 'index' },
+                })
+              );
             },
           })}
         />

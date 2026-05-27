@@ -9,11 +9,13 @@ import {
   Alert,
   TouchableOpacity,
   Linking,
+  Modal,
+  Keyboard,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -31,11 +33,15 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetModalVisible, setResetModalVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
   const insets = useSafeAreaInsets();
+  const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
   const {
     control,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -56,31 +62,78 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = () => {
-    Alert.prompt(
-      '¿Olvidaste tu contraseña?',
-      'Ingresa tu correo electrónico y te enviaremos un enlace para restablecerla.',
-      async (email) => {
-        if (!email?.trim()) return;
-        setResetLoading(true);
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
-        setResetLoading(false);
-        if (error) {
-          Alert.alert('Error', 'No se pudo enviar el correo. Verifica que la dirección sea correcta.');
-        } else {
-          Alert.alert(
-            'Correo enviado',
-            'Revisa tu bandeja de entrada y sigue las instrucciones para restablecer tu contraseña.',
-          );
-        }
-      },
-      'plain-text',
-      '',
-      'email-address',
+    setResetEmail(getValues('email')?.trim() ?? '');
+    setResetModalVisible(true);
+  };
+
+  const handleEnviarReset = async () => {
+    const email = resetEmail.trim();
+    if (!email) {
+      Alert.alert('Correo requerido', 'Ingresa el correo con el que te registraste.');
+      return;
+    }
+    Keyboard.dismiss();
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    setResetLoading(false);
+    if (error) {
+      Alert.alert('Error', 'No se pudo enviar el correo. Verifica que la dirección sea correcta.');
+      return;
+    }
+    setResetModalVisible(false);
+    Alert.alert(
+      'Correo enviado',
+      'Revisa tu bandeja de entrada y sigue las instrucciones para restablecer tu contraseña.',
     );
   };
 
   return (
     <View style={styles.screen}>
+      <Modal
+        visible={resetModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!resetLoading) setResetModalVisible(false); }}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={[styles.modalCard, { marginBottom: insets.bottom + 16 }]}>
+            <Text style={styles.modalTitle}>Restablecer contraseña</Text>
+            <Text style={styles.modalDesc}>
+              Te enviaremos un enlace a tu correo para crear una nueva contraseña.
+            </Text>
+            <Input
+              label="Correo electrónico"
+              placeholder="usuario@empresa.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              value={resetEmail}
+              onChangeText={setResetEmail}
+              leftIcon={<Text style={styles.fieldIcon}>✉️</Text>}
+            />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnGhost]}
+                onPress={() => { if (!resetLoading) setResetModalVisible(false); }}
+                disabled={resetLoading}
+              >
+                <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={handleEnviarReset}
+                disabled={resetLoading}
+              >
+                <Text style={styles.modalBtnPrimaryText}>{resetLoading ? 'Enviando…' : 'Enviar enlace'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <StatusBar style="light" />
       <View style={styles.topSection}>
         <View style={[styles.topContent, { paddingTop: insets.top + 32 }]}>
@@ -187,7 +240,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
           <Text style={[styles.version, { marginBottom: insets.bottom }]}>
-            Préstamos AB v1.0.0
+            Préstamos AB v{appVersion}
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -328,4 +381,25 @@ const styles = StyleSheet.create({
   },
   legalLink: { fontSize: 12, color: Colors.accent, fontWeight: '600' },
   legalSep: { fontSize: 12, color: Colors.muted },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    gap: 14,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: Colors.text },
+  modalDesc: { fontSize: 13, color: Colors.muted, lineHeight: 19 },
+  modalBtns: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  modalBtnGhost: { backgroundColor: Colors.surface2 },
+  modalBtnGhostText: { fontSize: 14, fontWeight: '700', color: Colors.muted },
+  modalBtnPrimary: { backgroundColor: Colors.accent },
+  modalBtnPrimaryText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 });

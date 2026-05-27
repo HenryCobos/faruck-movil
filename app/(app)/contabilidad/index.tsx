@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { contabilidadService, ResumenContable, AsientoContable } from '@/services/contabilidad.service';
@@ -62,7 +62,11 @@ export default function ContabilidadScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   if (loading) return <LoadingScreen label="Cargando contabilidad..." />;
 
@@ -105,7 +109,6 @@ export default function ContabilidadScreen() {
         <Text style={styles.sectionTitle}>Indicadores del Mes</Text>
         <View style={styles.kpiGrid}>
           <KPICard label="Ingresos Totales" value={formatCurrency(resumen?.ingresos_mes ?? 0)} icon="📈" color={Colors.success} />
-          <KPICard label="Mora Cobrada" value={formatCurrency(resumen?.mora_mes ?? 0)} icon="⚠️" color={Colors.warning} />
           <KPICard label="Total Cobrado" value={formatCurrency(resumen?.total_cobrado_mes ?? 0)} icon="💳" color={Colors.info} />
           <KPICard label="Cartera Vigente" value={formatCurrency(resumen?.cartera_vigente ?? 0)} icon="📂" color={Colors.accent} sub="Préstamos activos" />
         </View>

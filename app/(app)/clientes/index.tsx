@@ -39,6 +39,7 @@ function ClienteCard({ item }: { item: Cliente }) {
       </View>
       <View style={styles.cardContent}>
         <Text style={styles.cardName}>{item.nombre} {item.apellido}</Text>
+        {!!item.alias && <Text style={styles.cardAlias}>🏷️ {item.alias}</Text>}
         <Text style={styles.cardSub}>{item.documento_tipo.toUpperCase()} {item.documento_numero}</Text>
         <Text style={styles.cardPhone}>📞 {item.telefono}</Text>
       </View>
@@ -175,6 +176,7 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 16, fontWeight: '800' },
   cardContent: { flex: 1, gap: 2 },
   cardName: { fontSize: 15, fontWeight: '700', color: Colors.text },
+  cardAlias: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
   cardSub: { fontSize: 12, color: Colors.muted },
   cardPhone: { fontSize: 12, color: Colors.muted },
   cardRight: { alignItems: 'flex-end', gap: 6 },

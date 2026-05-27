@@ -17,6 +17,7 @@ import { Colors } from '@/constants/colors';
 const schema = z.object({
   nombre: z.string().min(2, 'Mínimo 2 caracteres'),
   apellido: z.string().min(2, 'Mínimo 2 caracteres'),
+  alias: z.string().optional().or(z.literal('')),
   documento_tipo: z.enum(['ci', 'pasaporte', 'ruc']),
   documento_numero: z.string().min(5, 'Número de documento inválido'),
   telefono: z.string().min(7, 'Teléfono inválido'),
@@ -34,7 +35,7 @@ const DOC_OPTIONS = [
 ];
 
 const DEFAULT_VALUES = {
-  nombre: '', apellido: '', documento_tipo: 'ci' as const,
+  nombre: '', apellido: '', alias: '', documento_tipo: 'ci' as const,
   documento_numero: '', telefono: '', email: '',
   direccion: '', scoring: 50,
 };
@@ -57,11 +58,12 @@ export default function NuevoClienteScreen() {
     try {
       await clientesService.create({
         ...data,
+        alias: data.alias || undefined,
         email: data.email || undefined,
         estado: 'activo',
         scoring: Number(data.scoring),
       } as any);
-      router.back();
+      router.canGoBack() ? router.back() : router.replace('/(app)/clientes');
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'No se pudo guardar el cliente');
     } finally {
@@ -72,7 +74,7 @@ export default function NuevoClienteScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/clientes')} style={styles.backBtn}>
           <Text style={styles.backIcon}>✕</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nuevo Cliente</Text>
@@ -99,6 +101,17 @@ export default function NuevoClienteScreen() {
                 )} />
               </View>
             </View>
+            <Controller control={control} name="alias" render={({ field: { onChange, value } }) => (
+              <Input
+                label="Alias (opcional)"
+                placeholder="Ej: Juancho, El gordo, La señora del mercado..."
+                value={value}
+                onChangeText={onChange}
+                error={errors.alias?.message}
+                hint="Nombre informal para identificarlo rápidamente en búsquedas"
+                leftIcon={<Text style={styles.fi}>🏷️</Text>}
+              />
+            )} />
             <Controller control={control} name="documento_tipo" render={({ field: { onChange, value } }) => (
               <Select label="Tipo de Documento" options={DOC_OPTIONS} value={value} onSelect={onChange} error={errors.documento_tipo?.message} />
             )} />

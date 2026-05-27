@@ -10,7 +10,8 @@ CREATE OR REPLACE FUNCTION registrar_pago(
   p_monto_pagado  NUMERIC,
   p_mora_cobrada  NUMERIC DEFAULT 0,
   p_metodo_pago   metodo_pago DEFAULT 'efectivo',
-  p_observaciones TEXT DEFAULT NULL
+  p_observaciones TEXT DEFAULT NULL,
+  p_fecha_pago    DATE DEFAULT CURRENT_DATE
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -42,8 +43,8 @@ BEGIN
   -- Obtener préstamo
   SELECT * INTO v_prestamo FROM prestamos WHERE id = v_cuota.prestamo_id;
 
-  -- Generar número de recibo único
-  v_recibo_num := 'REC-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' ||
+  -- Generar número de recibo único (usa la fecha elegida por el usuario)
+  v_recibo_num := 'REC-' || TO_CHAR(p_fecha_pago, 'YYYYMMDD') || '-' ||
                   LPAD(FLOOR(RANDOM() * 99999)::TEXT, 5, '0');
 
   -- Obtener cuentas contables
@@ -58,20 +59,20 @@ BEGIN
   v_capital_part  := GREATEST(v_capital_part, 0);
   v_interes_part  := GREATEST(v_interes_part, 0);
 
-  -- Registrar el pago
+  -- Registrar el pago (con la fecha elegida por el usuario)
   INSERT INTO pagos (
     cuota_id, cajero_id, monto_pagado, mora_cobrada,
-    metodo_pago, numero_recibo, observaciones
+    metodo_pago, numero_recibo, observaciones, fecha_pago
   ) VALUES (
     p_cuota_id, p_cajero_id, p_monto_pagado, p_mora_cobrada,
-    p_metodo_pago, v_recibo_num, p_observaciones
+    p_metodo_pago, v_recibo_num, p_observaciones, p_fecha_pago
   ) RETURNING id INTO v_pago_id;
 
   -- Actualizar estado de la cuota y limpiar mora acumulada
   UPDATE cuotas
   SET
     estado         = 'pagada',
-    fecha_pago     = NOW(),
+    fecha_pago     = p_fecha_pago,
     mora_acumulada = 0
   WHERE id = p_cuota_id;
 
@@ -80,7 +81,7 @@ BEGIN
   -- 1. Ingreso de caja total (DEBE)
   IF v_cuenta_caja IS NOT NULL THEN
     INSERT INTO asientos_contables (fecha, concepto, debe, haber, cuenta_id, referencia_id, tipo_referencia, usuario_id)
-    VALUES (CURRENT_DATE,
+    VALUES (p_fecha_pago,
       'Cobro cuota #' || v_cuota.numero_cuota || ' — Préstamo ' || v_prestamo.id,
       p_monto_pagado, 0, v_cuenta_caja, v_pago_id, 'pago_capital', p_cajero_id);
   END IF;
@@ -88,7 +89,7 @@ BEGIN
   -- 2. Reducción cartera (HABER)
   IF v_cuenta_cartera IS NOT NULL AND v_capital_part > 0 THEN
     INSERT INTO asientos_contables (fecha, concepto, debe, haber, cuenta_id, referencia_id, tipo_referencia, usuario_id)
-    VALUES (CURRENT_DATE,
+    VALUES (p_fecha_pago,
       'Recuperación capital cuota #' || v_cuota.numero_cuota,
       0, v_capital_part, v_cuenta_cartera, v_pago_id, 'pago_capital', p_cajero_id);
   END IF;
@@ -96,7 +97,7 @@ BEGIN
   -- 3. Ingreso por intereses (HABER)
   IF v_cuenta_interes IS NOT NULL AND v_interes_part > 0 THEN
     INSERT INTO asientos_contables (fecha, concepto, debe, haber, cuenta_id, referencia_id, tipo_referencia, usuario_id)
-    VALUES (CURRENT_DATE,
+    VALUES (p_fecha_pago,
       'Interés cuota #' || v_cuota.numero_cuota,
       0, v_interes_part, v_cuenta_interes, v_pago_id, 'pago_interes', p_cajero_id);
   END IF;
@@ -104,7 +105,7 @@ BEGIN
   -- 4. Ingreso por mora (HABER)
   IF v_cuenta_mora IS NOT NULL AND p_mora_cobrada > 0 THEN
     INSERT INTO asientos_contables (fecha, concepto, debe, haber, cuenta_id, referencia_id, tipo_referencia, usuario_id)
-    VALUES (CURRENT_DATE,
+    VALUES (p_fecha_pago,
       'Mora cuota #' || v_cuota.numero_cuota,
       0, p_mora_cobrada, v_cuenta_mora, v_pago_id, 'mora', p_cajero_id);
   END IF;
@@ -162,7 +163,8 @@ END;
 $$;
 
 -- Vista: cuotas pendientes enriquecidas (muy útil para la pantalla de cobros)
-CREATE OR REPLACE VIEW v_cuotas_pendientes
+DROP VIEW IF EXISTS v_cuotas_pendientes;
+CREATE VIEW v_cuotas_pendientes
 WITH (security_invoker = true)
 AS
 SELECT
@@ -187,30 +189,38 @@ SELECT
   END AS mora_calculada,
   p.monto_principal,
   p.tasa_mensual,
-  cl.nombre        AS cliente_nombre,
-  cl.apellido      AS cliente_apellido,
-  cl.telefono      AS cliente_telefono,
+  cl.nombre           AS cliente_nombre,
+  cl.apellido         AS cliente_apellido,
+  cl.alias            AS cliente_alias,
+  cl.telefono         AS cliente_telefono,
   cl.documento_numero AS cliente_documento,
-  g.tipo           AS garantia_tipo,
-  g.descripcion    AS garantia_descripcion
+  g.tipo              AS garantia_tipo,
+  g.descripcion       AS garantia_descripcion
 FROM cuotas c
-JOIN prestamos p  ON p.id  = c.prestamo_id
-JOIN clientes  cl ON cl.id = p.cliente_id
-JOIN garantias g  ON g.id  = p.garantia_id
+JOIN  prestamos p  ON p.id  = c.prestamo_id
+JOIN  clientes  cl ON cl.id = p.cliente_id
+LEFT JOIN garantias g  ON g.id  = p.garantia_id
 WHERE c.estado IN ('pendiente', 'vencida', 'parcial');
 
 -- Vista: estado de resultados mensual
-CREATE OR REPLACE VIEW v_estado_resultados
+-- Usa haber - debe para netear los asientos de reversa (anulaciones) correctamente.
+DROP VIEW IF EXISTS v_estado_resultados;
+CREATE VIEW v_estado_resultados
 WITH (security_invoker = true)
 AS
 SELECT
   DATE_TRUNC('month', fecha) AS mes,
-  SUM(CASE WHEN pc.codigo = '4110' THEN haber ELSE 0 END) AS ingresos_intereses,
-  SUM(CASE WHEN pc.codigo = '4120' THEN haber ELSE 0 END) AS ingresos_comisiones,
-  SUM(CASE WHEN pc.codigo = '4130' THEN haber ELSE 0 END) AS ingresos_mora,
-  SUM(CASE WHEN pc.tipo = 'egreso' THEN debe ELSE 0 END)  AS egresos,
-  SUM(CASE WHEN pc.tipo = 'ingreso' THEN haber ELSE 0 END) -
-  SUM(CASE WHEN pc.tipo = 'egreso' THEN debe ELSE 0 END)  AS utilidad_neta
+  -- Intereses netos: haber (cobros) menos debe (reversas de cobros)
+  GREATEST(SUM(CASE WHEN pc.codigo = '4110' THEN haber - debe ELSE 0 END), 0) AS ingresos_intereses,
+  -- Comisiones netas
+  GREATEST(SUM(CASE WHEN pc.codigo = '4120' THEN haber - debe ELSE 0 END), 0) AS ingresos_comisiones,
+  -- Mora neta
+  GREATEST(SUM(CASE WHEN pc.codigo = '4130' THEN haber - debe ELSE 0 END), 0) AS ingresos_mora,
+  -- Egresos netos
+  GREATEST(SUM(CASE WHEN pc.tipo = 'egreso' THEN debe - haber ELSE 0 END), 0) AS egresos,
+  -- Utilidad neta: ingresos netos menos egresos netos
+  SUM(CASE WHEN pc.tipo = 'ingreso' THEN haber - debe ELSE 0 END) -
+  SUM(CASE WHEN pc.tipo = 'egreso'  THEN debe - haber ELSE 0 END) AS utilidad_neta
 FROM asientos_contables ac
 JOIN plan_cuentas pc ON pc.id = ac.cuenta_id
 GROUP BY DATE_TRUNC('month', fecha)

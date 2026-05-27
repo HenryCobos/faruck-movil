@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { reportesService, ResumenCartera } from '@/services/reportes.service';
@@ -56,7 +56,11 @@ export default function ReportesScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   if (loading) return <LoadingScreen label="Cargando reportes..." />;
 
@@ -100,9 +104,9 @@ export default function ReportesScreen() {
               <Text style={styles.overviewBigValue}>{formatCurrency(resumen?.monto_total_cartera ?? 0)}</Text>
             </View>
             <View style={[styles.overviewBig, styles.overviewBigRight]}>
-              <Text style={styles.overviewBigLabel}>Tasa de mora</Text>
-              <Text style={[styles.overviewBigValue, { color: (resumen?.tasa_mora ?? 0) > 5 ? Colors.danger : Colors.success }]}>
-                {resumen?.tasa_mora ?? 0}%
+              <Text style={styles.overviewBigLabel}>Cuotas vencidas</Text>
+              <Text style={[styles.overviewBigValue, { color: (resumen?.cuotas_vencidas ?? 0) > 0 ? Colors.danger : Colors.success }]}>
+                {resumen?.cuotas_vencidas ?? 0}
               </Text>
             </View>
           </View>

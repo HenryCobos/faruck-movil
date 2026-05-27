@@ -11,50 +11,89 @@ import { Colors, RoleColors } from '@/constants/colors';
 import { UserRole } from '@/types';
 
 interface MenuItem {
-  icon: string;
+  icon:  string;
   title: string;
-  desc: string;
+  desc:  string;
   route: string;
   color: string;
-  adminOnly?: boolean;
 }
 
-const MENU_ITEMS: Record<UserRole, MenuItem[]> = {
+// ─── Items de trabajo (por rol) ───────────────────────────────
+const WORK_ITEMS: Record<UserRole, MenuItem[]> = {
   admin: [
-    { icon: '👥', title: 'Clientes',       desc: 'Registro y consulta',     route: '/(app)/clientes',      color: Colors.info },
-    { icon: '🏠', title: 'Garantías',      desc: 'Bienes en custodia',      route: '/(app)/garantias',     color: Colors.warning },
-    { icon: '🔑', title: 'Usuarios',       desc: 'Control de acceso',       route: '/(app)/usuarios',      color: '#9B74F5' },
-    { icon: '🛡️', title: 'Auditoría',      desc: 'Historial de acciones',   route: '/(app)/auditoria',     color: Colors.success },
-    { icon: '⚙️', title: 'Configuración',  desc: 'Datos de la empresa',     route: '/(app)/configuracion', color: Colors.muted },
-    { icon: '👤', title: 'Mi Perfil',      desc: 'Cuenta y contraseña',     route: '/(app)/perfil',        color: Colors.accent },
+    { icon: '👥', title: 'Clientes',      desc: 'Registro y consulta',   route: '/(app)/clientes',      color: Colors.info },
+    { icon: '🏠', title: 'Garantías',     desc: 'Bienes en custodia',    route: '/(app)/garantias',     color: Colors.warning },
+    { icon: '🔑', title: 'Usuarios',      desc: 'Control de acceso',     route: '/(app)/usuarios',      color: '#9B74F5' },
+    { icon: '🛡️', title: 'Auditoría',     desc: 'Historial de acciones', route: '/(app)/auditoria',     color: Colors.success },
+    { icon: '⚙️', title: 'Configuración', desc: 'Datos de la empresa',   route: '/(app)/configuracion', color: Colors.muted },
+    { icon: '👤', title: 'Mi Perfil',     desc: 'Cuenta y contraseña',   route: '/(app)/perfil',        color: Colors.accent },
   ],
   oficial: [
-    { icon: '👥', title: 'Clientes',       desc: 'Registro y consulta',     route: '/(app)/clientes',  color: Colors.info },
-    { icon: '🏠', title: 'Garantías',      desc: 'Bienes en custodia',      route: '/(app)/garantias', color: Colors.warning },
-    { icon: '👤', title: 'Mi Perfil',      desc: 'Cuenta y contraseña',     route: '/(app)/perfil',    color: Colors.accent },
+    { icon: '👥', title: 'Clientes',  desc: 'Registro y consulta', route: '/(app)/clientes',  color: Colors.info },
+    { icon: '🏠', title: 'Garantías', desc: 'Bienes en custodia',  route: '/(app)/garantias', color: Colors.warning },
+    { icon: '👤', title: 'Mi Perfil', desc: 'Cuenta y contraseña', route: '/(app)/perfil',    color: Colors.accent },
   ],
   cajero: [
-    { icon: '👥', title: 'Clientes',       desc: 'Consultar clientes',      route: '/(app)/clientes',  color: Colors.info },
-    { icon: '👤', title: 'Mi Perfil',      desc: 'Cuenta y contraseña',     route: '/(app)/perfil',    color: Colors.accent },
+    { icon: '👥', title: 'Clientes',  desc: 'Consultar clientes',  route: '/(app)/clientes',  color: Colors.info },
+    { icon: '👤', title: 'Mi Perfil', desc: 'Cuenta y contraseña', route: '/(app)/perfil',    color: Colors.accent },
   ],
   auditor: [
-    { icon: '🛡️', title: 'Auditoría',      desc: 'Historial de acciones',   route: '/(app)/auditoria', color: Colors.success },
-    { icon: '👤', title: 'Mi Perfil',      desc: 'Cuenta y contraseña',     route: '/(app)/perfil',    color: Colors.accent },
+    { icon: '🛡️', title: 'Auditoría', desc: 'Historial de acciones', route: '/(app)/auditoria', color: Colors.success },
+    { icon: '👤', title: 'Mi Perfil', desc: 'Cuenta y contraseña',   route: '/(app)/perfil',    color: Colors.accent },
   ],
 };
+
+// ─── Herramientas personales (iguales para todos los roles) ───
+const PERSONAL_ITEMS: MenuItem[] = [
+  {
+    icon:  '🔗',
+    title: 'Cadenas de Ahorro',
+    desc:  'Panderos y tontinas',
+    route: '/(app)/cadenas',
+    color: '#7C3AED',
+  },
+  {
+    icon:  '💸',
+    title: 'Préstamos Personales',
+    desc:  'Control de mis deudas',
+    route: '/(app)/prestamos-personales',
+    color: Colors.danger,
+  },
+];
 
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: 'Administrador', oficial: 'Oficial de Crédito',
   cajero: 'Cajero', auditor: 'Auditor',
 };
 
+function MenuGrid({ items }: { items: MenuItem[] }) {
+  return (
+    <View style={styles.grid}>
+      {items.map((item) => (
+        <TouchableOpacity
+          key={item.route}
+          style={styles.card}
+          onPress={() => router.push(item.route as any)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.cardIconWrap, { backgroundColor: `${item.color}15` }]}>
+            <Text style={styles.cardIcon}>{item.icon}</Text>
+          </View>
+          <Text style={styles.cardTitle}>{item.title}</Text>
+          <Text style={styles.cardDesc}>{item.desc}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 export default function SistemaScreen() {
   const insets = useSafeAreaInsets();
   const { profile, signOut } = useAuthStore();
-  const role = (profile?.rol ?? 'cajero') as UserRole;
-  const items = MENU_ITEMS[role];
+  const role      = (profile?.rol ?? 'cajero') as UserRole;
+  const workItems = WORK_ITEMS[role];
   const roleColor = RoleColors[role];
-  const initials = profile
+  const initials  = profile
     ? `${profile.nombre?.[0] ?? ''}${profile.apellido?.[0] ?? ''}`.toUpperCase()
     : '??';
 
@@ -82,25 +121,18 @@ export default function SistemaScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Módulos de trabajo ── */}
         <Text style={styles.sectionLabel}>MÓDULOS Y HERRAMIENTAS</Text>
+        <MenuGrid items={workItems} />
 
-        {/* Grid de módulos */}
-        <View style={styles.grid}>
-          {items.map((item) => (
-            <TouchableOpacity
-              key={item.route}
-              style={styles.card}
-              onPress={() => router.push(item.route as any)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.cardIconWrap, { backgroundColor: `${item.color}15` }]}>
-                <Text style={styles.cardIcon}>{item.icon}</Text>
-              </View>
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardDesc}>{item.desc}</Text>
-            </TouchableOpacity>
-          ))}
+        {/* ── Herramientas personales ── */}
+        <View style={styles.personalHeader}>
+          <Text style={styles.sectionLabel}>HERRAMIENTAS PERSONALES</Text>
+          <View style={styles.personalBadge}>
+            <Text style={styles.personalBadgeText}>Solo tuyo · no compartido</Text>
+          </View>
         </View>
+        <MenuGrid items={PERSONAL_ITEMS} />
 
         {/* Separador */}
         <View style={styles.divider} />
@@ -137,13 +169,23 @@ const styles = StyleSheet.create({
   },
   rolePillText: { fontSize: 11, fontWeight: '700' },
 
-  scroll: { padding: 16 },
+  scroll: { padding: 16, gap: 0 },
   sectionLabel: {
     fontSize: 10, fontWeight: '700', color: Colors.muted,
     letterSpacing: 1.5, marginBottom: 12, marginTop: 4,
   },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  personalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 20, marginBottom: 0,
+  },
+  personalBadge: {
+    backgroundColor: '#7C3AED18', borderRadius: 20,
+    paddingHorizontal: 10, paddingVertical: 3,
+  },
+  personalBadgeText: { fontSize: 10, fontWeight: '700', color: '#7C3AED' },
+
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 4 },
   card: {
     width: '47%',
     backgroundColor: Colors.surface, borderRadius: 16, padding: 18, gap: 8,

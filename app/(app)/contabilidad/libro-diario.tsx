@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { contabilidadService, AsientoContable } from '@/services/contabilidad.service';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -54,27 +54,33 @@ export default function LibroDiarioScreen() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [page, setPage] = useState(0);
+  /** Página siguiente a pedir en scroll infinito (1 = ya se cargó la primera página). */
+  const pageRef = useRef(0);
   const PAGE_SIZE = 30;
 
   const load = useCallback(async (reset = false) => {
-    const offset = reset ? 0 : page * PAGE_SIZE;
+    const offset = reset ? 0 : pageRef.current * PAGE_SIZE;
     try {
       const data = await contabilidadService.getLibroDiario(PAGE_SIZE, offset);
       if (reset) {
         setAsientos(data);
         setFiltered(data);
-        setPage(1);
+        pageRef.current = 1;
       } else {
+        if (data.length === 0) return;
         setAsientos(prev => [...prev, ...data]);
         setFiltered(prev => [...prev, ...data]);
-        setPage(prev => prev + 1);
+        pageRef.current += 1;
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [page]);
+  }, []);
 
-  useEffect(() => { load(true); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load(true);
+    }, [load])
+  );
 
   const onSearch = (q: string) => {
     setSearch(q);
@@ -95,7 +101,7 @@ export default function LibroDiarioScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/contabilidad')} style={styles.backBtn}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Libro Diario</Text>

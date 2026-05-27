@@ -59,7 +59,7 @@ export default function NuevoUsuarioScreen() {
       Alert.alert(
         '✅ Usuario creado',
         `${data.nombre} ${data.apellido} puede iniciar sesión con:\nCorreo: ${data.email}\nContraseña: la que ingresaste`,
-        [{ text: 'Aceptar', onPress: () => router.back() }]
+        [{ text: 'Aceptar', onPress: () => router.canGoBack() ? router.back() : router.replace('/(app)/usuarios') }]
       );
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'No se pudo crear el usuario');
@@ -71,7 +71,7 @@ export default function NuevoUsuarioScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/usuarios')} style={styles.closeBtn}>
           <Text style={styles.closeIcon}>✕</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nuevo Usuario</Text>

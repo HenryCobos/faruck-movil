@@ -11,9 +11,6 @@ export interface Configuracion {
   ruc_nit?: string;
   moneda: string;
   simbolo_moneda: string;
-  tasa_mora_diaria: number;
-  tasa_mora_label: string;
-  dias_gracia: number;
   logo_url?: string;
   color_primario: string;
   updated_at: string;
@@ -26,9 +23,6 @@ const DEFAULTS: Configuracion = {
   slogan: 'Sistema de Créditos con Garantía',
   moneda: 'Bs',
   simbolo_moneda: '$',
-  tasa_mora_diaria: 0.001,
-  tasa_mora_label: '0.1% diario',
-  dias_gracia: 0,
   color_primario: '#0D1B2A',
   updated_at: '',
 };
@@ -58,14 +52,14 @@ export const configuracionService = {
         const { data: inserted, error: insErr } = await supabase
           .from('configuracion')
           .insert({
-            nombre_empresa: DEFAULTS.nombre_empresa,
-            slogan:         DEFAULTS.slogan,
-            moneda:         DEFAULTS.moneda,
-            simbolo_moneda: DEFAULTS.simbolo_moneda,
-            tasa_mora_diaria: DEFAULTS.tasa_mora_diaria,
-            tasa_mora_label:  DEFAULTS.tasa_mora_label,
-            dias_gracia:    DEFAULTS.dias_gracia,
-            color_primario: DEFAULTS.color_primario,
+            nombre_empresa:   DEFAULTS.nombre_empresa,
+            slogan:           DEFAULTS.slogan,
+            moneda:           DEFAULTS.moneda,
+            simbolo_moneda:   DEFAULTS.simbolo_moneda,
+            tasa_mora_diaria: 0,
+            tasa_mora_label:  'N/A',
+            dias_gracia:      0,
+            color_primario:   DEFAULTS.color_primario,
           })
           .select()
           .single();
@@ -139,7 +133,8 @@ export const configuracionService = {
   // Helper para formatear moneda usando la configuración
   formatMonto(monto: number, config?: Configuracion): string {
     const simbolo = config?.simbolo_moneda ?? '$';
-    return `${simbolo}${monto.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const decimals = monto % 1 !== 0 ? 2 : 0;
+    return `${simbolo}${monto.toLocaleString('es', { minimumFractionDigits: decimals, maximumFractionDigits: 2 })}`;
   },
 };
 

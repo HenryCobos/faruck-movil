@@ -24,9 +24,6 @@ const schema = z.object({
   ruc_nit:          z.string().optional(),
   moneda:           z.string().min(1, 'Requerido'),
   simbolo_moneda:   z.string().min(1, 'Requerido'),
-  tasa_mora_label:  z.string().min(1, 'Requerido'),
-  tasa_mora_diaria: z.coerce.number().min(0).max(1),
-  dias_gracia:      z.coerce.number().min(0).max(30),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -58,11 +55,8 @@ export default function ConfiguracionScreen() {
           telefono:         c.telefono ?? '',
           email:            c.email ?? '',
           ruc_nit:          c.ruc_nit ?? '',
-          moneda:           c.moneda,
-          simbolo_moneda:   c.simbolo_moneda,
-          tasa_mora_label:  c.tasa_mora_label,
-          tasa_mora_diaria: c.tasa_mora_diaria,
-          dias_gracia:      c.dias_gracia,
+          moneda:         c.moneda,
+          simbolo_moneda: c.simbolo_moneda,
         });
       })
       .catch(e => Alert.alert('Error', e.message))
@@ -228,40 +222,6 @@ export default function ConfiguracionScreen() {
               </View>
             </View>
 
-            <View style={styles.moraBox}>
-              <Text style={styles.moraBoxTitle}>⚠️ Mora por incumplimiento</Text>
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Controller control={control} name="tasa_mora_diaria"
-                    render={({ field: { onChange, value } }) => (
-                      <Input label="Tasa diaria (decimal)" value={String(value)}
-                        onChangeText={onChange} keyboardType="decimal-pad"
-                        placeholder="0.001" error={errors.tasa_mora_diaria?.message}
-                        hint="0.001 = 0.1% diario" />
-                    )} />
-                </View>
-                <View style={styles.flex}>
-                  <Controller control={control} name="dias_gracia"
-                    render={({ field: { onChange, value } }) => (
-                      <Input label="Días de gracia" value={String(value)}
-                        onChangeText={onChange} keyboardType="numeric"
-                        placeholder="0" hint="Días antes de cobrar mora" />
-                    )} />
-                </View>
-              </View>
-              <Controller control={control} name="tasa_mora_label"
-                render={({ field: { onChange, value } }) => (
-                  <Input label="Etiqueta descriptiva" value={value} onChangeText={onChange}
-                    placeholder="0.1% diario" hint="Texto que aparece en recibos y reportes" />
-                )} />
-            </View>
-          </View>
-
-          <View style={styles.warningBox}>
-            <Text style={styles.warningIcon}>⚠️</Text>
-            <Text style={styles.warningText}>
-              Los cambios en la tasa de mora afectan los nuevos cálculos pero NO modifican cuotas ya generadas.
-            </Text>
           </View>
 
           <Button
@@ -295,11 +255,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontWeight: '700', color: Colors.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
   row: { flexDirection: 'row', gap: 12 },
   fi: { fontSize: 16 },
-  moraBox: {
-    backgroundColor: `${Colors.warning}08`, borderRadius: 10, padding: 14, gap: 10,
-    borderWidth: 1, borderColor: `${Colors.warning}20`,
-  },
-  moraBoxTitle: { fontSize: 13, fontWeight: '700', color: Colors.warning },
   logoRow: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   logoBox: {
     width: 100, height: 100, borderRadius: 16, borderWidth: 2,

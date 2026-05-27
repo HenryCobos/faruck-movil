@@ -16,7 +16,7 @@ import { Garantia, GarantiaType, GarantiaEstado } from '@/types';
 
 const TIPO_ICON: Record<GarantiaType, string> = {
   inmueble: '🏠', vehiculo: '🚗', joya: '💍',
-  electrodomestico: '📺', otro: '📦',
+  electrodomestico: '📺', cheque: '🏦', letra_de_cambio: '📋', otro: '📦',
 };
 
 const ESTADO_VARIANT: Record<GarantiaEstado, any> = {

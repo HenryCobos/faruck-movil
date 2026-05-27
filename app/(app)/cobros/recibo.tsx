@@ -27,12 +27,12 @@ function generarHtmlRecibo(params: {
   numeroCuota: string;
   capital: number;
   interes: number;
-  mora: number;
   total: number;
   metodo: string;
   cancelado: boolean;
   fechaHora: string;
   config: Configuracion;
+  saldoPendiente?: number;
 }): string {
   const { config } = params;
   const s = config.simbolo_moneda;
@@ -96,6 +96,12 @@ function generarHtmlRecibo(params: {
     .desglose-row:last-child { border-bottom: none; }
     .desglose-label { font-size: 12px; color: #666; }
     .desglose-value { font-size: 12px; font-weight: 600; color: #111; }
+
+    /* Saldo pendiente */
+    .saldo-row { background: #fafafa; border-radius: 8px; padding: 10px 0 !important; margin-top: 4px; }
+    .saldo-label { font-weight: 700 !important; color: #444 !important; }
+    .saldo-monto { color: #dc2626 !important; font-size: 14px !important; }
+    .saldo-cero  { color: #16a34a !important; font-size: 14px !important; }
 
     /* Total */
     .total-box {
@@ -167,7 +173,11 @@ function generarHtmlRecibo(params: {
       <div class="section-label">Detalle de su pago</div>
       <div class="desglose-row"><span class="desglose-label">Abono a capital</span><span class="desglose-value">${s}${params.capital.toLocaleString('es', { minimumFractionDigits: 2 })}</span></div>
       <div class="desglose-row"><span class="desglose-label">Intereses del período</span><span class="desglose-value">${s}${params.interes.toLocaleString('es', { minimumFractionDigits: 2 })}</span></div>
-      ${params.mora > 0 ? `<div class="desglose-row"><span class="desglose-label" style="color:#dc2626">Mora pagada</span><span class="desglose-value" style="color:#dc2626">${s}${params.mora.toLocaleString('es', { minimumFractionDigits: 2 })}</span></div>` : ''}
+      ${params.saldoPendiente !== undefined ? `
+      <div class="desglose-row saldo-row">
+        <span class="desglose-label saldo-label">Saldo pendiente del préstamo</span>
+        <span class="desglose-value ${params.cancelado ? 'saldo-cero' : 'saldo-monto'}">${params.cancelado ? `${s}0` : `${s}${params.saldoPendiente.toLocaleString('es', { minimumFractionDigits: 2 })}`}</span>
+      </div>` : ''}
 
       <div class="total-box">
         <div class="total-label">Total pagado</div>
@@ -202,7 +212,7 @@ export default function ReciboScreen() {
   const insets = useSafeAreaInsets();
   const {
     reciboNum, clienteNombre, numeroCuota,
-    capital, interes, mora, total, metodo, cancelado,
+    capital, interes, total, metodo, cancelado, fechaPago, modo, saldoPendiente,
   } = useLocalSearchParams<Record<string, string>>();
 
   const [config, setConfig] = useState<Configuracion | null>(null);
@@ -210,15 +220,25 @@ export default function ReciboScreen() {
   const [exportando, setExportando] = useState(false);
 
   const esCancelado = cancelado === '1';
-  const fechaHora = new Date().toLocaleString('es', {
-    day: '2-digit', month: 'long', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+
+  // Si viene fecha del param (YYYY-MM-DD) la usamos; si no, la fecha actual.
+  // La hora se toma siempre del momento en que se genera el recibo.
+  const fechaHora = (() => {
+    const ahora = new Date();
+    const hora = ahora.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    if (fechaPago && /^\d{4}-\d{2}-\d{2}$/.test(fechaPago)) {
+      const [y, m, d] = fechaPago.split('-').map(Number);
+      const fecha = new Date(y, m - 1, d);
+      const fechaStr = fecha.toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' });
+      return `${fechaStr} · ${hora}`;
+    }
+    return ahora.toLocaleString('es', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  })();
 
   const cap   = Number(capital ?? 0);
   const int   = Number(interes ?? 0);
-  const mor   = Number(mora ?? 0);
   const tot   = Number(total ?? 0);
+  const saldo = saldoPendiente !== undefined ? Number(saldoPendiente) : undefined;
 
   useEffect(() => {
     configuracionService.get()
@@ -239,11 +259,12 @@ export default function ReciboScreen() {
         reciboNum: reciboNum ?? '',
         clienteNombre: clienteNombre ?? '',
         numeroCuota: numeroCuota ?? '',
-        capital: cap, interes: int, mora: mor, total: tot,
+        capital: cap, interes: int, total: tot,
         metodo: metodo ?? 'efectivo',
         cancelado: esCancelado,
         fechaHora,
         config,
+        saldoPendiente: saldo,
       });
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {
@@ -272,8 +293,18 @@ export default function ReciboScreen() {
 
       {/* Barra superior */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8, backgroundColor: colorPrim }]}>
-        <Text style={styles.topBarTitle}>Comprobante de Pago</Text>
-        <TouchableOpacity onPress={() => router.replace('/(app)/cobros' as any)}>
+        <View style={{ width: 36 }} />
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle}>Comprobante de Pago</Text>
+          <Text style={styles.topBarSub}>
+            {modo === 'ver' ? 'Recibo histórico · Regenerar PDF' : 'Pago registrado exitosamente'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          onPress={() => router.replace('/(app)/cobros' as any)}
+          style={styles.topBarCloseBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Text style={styles.topBarClose}>✕</Text>
         </TouchableOpacity>
       </View>
@@ -341,13 +372,14 @@ export default function ReciboScreen() {
               <Text style={styles.desgloseLabel}>Intereses del período</Text>
               <Text style={[styles.desgloseValue, { color: Colors.accent }]}>{formatCurrency(int)}</Text>
             </View>
-            {mor > 0 && (
-              <View style={styles.desgloseRow}>
-                <Text style={[styles.desgloseLabel, { color: Colors.danger }]}>Mora pagada</Text>
-                <Text style={[styles.desgloseValue, { color: Colors.danger }]}>{formatCurrency(mor)}</Text>
+            {saldo !== undefined && (
+              <View style={[styles.desgloseRow, styles.saldoRow]}>
+                <Text style={[styles.desgloseLabel, styles.saldoLabel]}>Saldo pendiente del préstamo</Text>
+                <Text style={[styles.desgloseValue, esCancelado ? styles.saldoCero : styles.saldoMonto]}>
+                  {esCancelado ? formatCurrency(0) : formatCurrency(saldo)}
+                </Text>
               </View>
             )}
-
             {/* Total */}
             <View style={[styles.totalBox, { backgroundColor: colorPrim }]}>
               <Text style={styles.totalLabel}>TOTAL PAGADO</Text>
@@ -397,8 +429,11 @@ export default function ReciboScreen() {
             <Text style={styles.btnPDFText}>{exportando ? 'Generando PDF...' : 'Exportar y Compartir PDF'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.btnVolver} onPress={() => router.replace('/(app)/cobros' as any)}>
-            <Text style={styles.btnVolverText}>Volver a Cobros</Text>
+          <TouchableOpacity
+            style={styles.btnVolver}
+            onPress={() => modo === 'ver' ? router.back() : router.replace('/(app)/cobros' as any)}
+          >
+            <Text style={styles.btnVolverText}>{modo === 'ver' ? 'Volver' : 'Volver a Cobros'}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -412,7 +447,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingBottom: 14,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
   },
+  topBarCenter: { flex: 1, alignItems: 'center' },
   topBarTitle: { fontSize: 16, fontWeight: '800', color: Colors.white },
+  topBarSub: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
+  topBarCloseBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   topBarClose: { fontSize: 18, color: 'rgba(255,255,255,0.7)', fontWeight: '700' },
   scroll: { padding: 16, gap: 14 },
 
@@ -469,6 +507,14 @@ const styles = StyleSheet.create({
   },
   desgloseLabel: { fontSize: 13, color: Colors.muted, flex: 1 },
   desgloseValue: { fontSize: 13, fontWeight: '700', color: Colors.text },
+  saldoRow: {
+    backgroundColor: '#fafafa', borderRadius: 8,
+    paddingHorizontal: 10, marginTop: 4,
+    borderBottomWidth: 0,
+  },
+  saldoLabel: { color: Colors.text, fontWeight: '600' },
+  saldoMonto: { color: '#dc2626', fontSize: 14 },
+  saldoCero:  { color: Colors.success, fontSize: 14 },
 
   totalBox: {
     borderRadius: 16, padding: 22, alignItems: 'center', gap: 4, marginTop: 18,

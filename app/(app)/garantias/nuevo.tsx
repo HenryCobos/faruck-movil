@@ -19,7 +19,7 @@ import { Cliente } from '@/types';
 
 const schema = z.object({
   cliente_id: z.string().min(1, 'Selecciona un cliente'),
-  tipo: z.enum(['inmueble', 'vehiculo', 'joya', 'electrodomestico', 'otro']),
+  tipo: z.enum(['inmueble', 'vehiculo', 'joya', 'electrodomestico', 'cheque', 'letra_de_cambio', 'otro']),
   descripcion: z.string().min(10, 'Describe el bien con más detalle'),
   valor_avaluo: z.coerce.number().min(1, 'El valor debe ser mayor a 0'),
   observaciones: z.string().optional(),
@@ -28,11 +28,13 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const TIPO_OPTIONS: SelectOption[] = [
-  { label: 'Inmueble / Casa / Terreno', value: 'inmueble', icon: '🏠' },
-  { label: 'Vehículo / Moto', value: 'vehiculo', icon: '🚗' },
-  { label: 'Joya / Oro / Plata', value: 'joya', icon: '💍' },
-  { label: 'Electrodoméstico', value: 'electrodomestico', icon: '📺' },
-  { label: 'Otro bien de valor', value: 'otro', icon: '📦' },
+  { label: 'Inmueble / Casa / Terreno', value: 'inmueble',         icon: '🏠' },
+  { label: 'Vehículo / Moto',           value: 'vehiculo',         icon: '🚗' },
+  { label: 'Joya / Oro / Plata',        value: 'joya',             icon: '💍' },
+  { label: 'Electrodoméstico',          value: 'electrodomestico', icon: '📺' },
+  { label: 'Cheque',                    value: 'cheque',           icon: '🏦' },
+  { label: 'Letra de Cambio',           value: 'letra_de_cambio',  icon: '📋' },
+  { label: 'Otro bien de valor',        value: 'otro',             icon: '📦' },
 ];
 
 export default function NuevaGarantiaScreen() {
@@ -67,7 +69,7 @@ export default function NuevaGarantiaScreen() {
   }, [reset, getDefaultValues]));
 
   const clienteOptions: SelectOption[] = clientes.map(c => ({
-    label: `${c.nombre} ${c.apellido} — ${c.documento_numero}`,
+    label: `${c.nombre} ${c.apellido}${c.alias ? ` (${c.alias})` : ''} — ${c.documento_numero}`,
     value: c.id,
     icon: '👤',
   }));
@@ -113,7 +115,7 @@ export default function NuevaGarantiaScreen() {
         }
       }
 
-      router.back();
+      router.canGoBack() ? router.back() : router.replace('/(app)/garantias');
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'No se pudo guardar la garantía');
     } finally {
@@ -124,7 +126,7 @@ export default function NuevaGarantiaScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/garantias')} style={styles.backBtn}>
           <Text style={styles.backIcon}>✕</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nueva Garantía</Text>

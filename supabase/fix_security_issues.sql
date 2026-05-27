@@ -46,9 +46,9 @@ SELECT
   g.tipo              AS garantia_tipo,
   g.descripcion       AS garantia_descripcion
 FROM cuotas c
-JOIN prestamos p  ON p.id  = c.prestamo_id
-JOIN clientes  cl ON cl.id = p.cliente_id
-JOIN garantias g  ON g.id  = p.garantia_id
+JOIN  prestamos p  ON p.id  = c.prestamo_id
+JOIN  clientes  cl ON cl.id = p.cliente_id
+LEFT JOIN garantias g  ON g.id  = p.garantia_id   -- LEFT JOIN: NULL cuando no hay garantía (crédito de producto)
 WHERE c.estado IN ('pendiente', 'vencida', 'parcial');
 
 GRANT SELECT ON v_cuotas_pendientes TO authenticated;

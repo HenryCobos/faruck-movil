@@ -96,7 +96,11 @@ export default function AuditoriaScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   useEffect(() => {
     let result = entries;

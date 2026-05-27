@@ -49,13 +49,13 @@ export default function EditarUsuarioScreen() {
   });
 
   useEffect(() => {
-    if (!id) { router.back(); return; }
+    if (!id) { router.canGoBack() ? router.back() : router.replace('/(app)/usuarios'); return; }
     usuariosService.getById(id)
       .then(u => {
         setUsuario(u);
         reset({ nombre: u.nombre, apellido: u.apellido, telefono: u.telefono ?? '', rol: u.rol });
       })
-      .catch(() => { Alert.alert('Error', 'No se encontró el usuario'); router.back(); })
+      .catch(() => { Alert.alert('Error', 'No se encontró el usuario'); router.canGoBack() ? router.back() : router.replace('/(app)/usuarios'); })
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -64,7 +64,7 @@ export default function EditarUsuarioScreen() {
     setSaving(true);
     try {
       await usuariosService.actualizar(id, data);
-      Alert.alert('✅ Guardado', 'Los datos del usuario fueron actualizados.', [{ text: 'Aceptar', onPress: () => router.back() }]);
+      Alert.alert('✅ Guardado', 'Los datos del usuario fueron actualizados.', [{ text: 'Aceptar', onPress: () => router.canGoBack() ? router.back() : router.replace('/(app)/usuarios') }]);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'No se pudo guardar');
     } finally {
@@ -102,7 +102,7 @@ export default function EditarUsuarioScreen() {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(app)/usuarios')} style={styles.closeBtn}>
           <Text style={styles.closeIcon}>✕</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Editar Usuario</Text>

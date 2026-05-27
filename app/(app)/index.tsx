@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuthStore } from '@/stores/auth.store';
 import { StatCard } from '@/components/ui/Card';
 import { Colors, RoleColors } from '@/constants/colors';
@@ -57,10 +57,10 @@ const QUICK_ACTIONS: Record<UserRole, QuickAction[]> = {
 };
 
 const ACTIVIDAD_ICON: Record<string, string> = {
-  pago: '💳', prestamo: '💰', cliente: '👤', mora: '⚠️',
+  pago: '💳', prestamo: '💰', cliente: '👤',
 };
 const ACTIVIDAD_COLOR: Record<string, string> = {
-  pago: Colors.success, prestamo: Colors.info, cliente: Colors.accent, mora: Colors.danger,
+  pago: Colors.success, prestamo: Colors.info, cliente: Colors.accent,
 };
 
 function timeAgo(dateStr: string): string {
@@ -107,7 +107,11 @@ export default function DashboardScreen() {
     }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const onRefresh = () => { setRefreshing(true); load(); };
 
@@ -186,7 +190,7 @@ export default function DashboardScreen() {
               </View>
               <View style={styles.statsRow}>
                 <StatCard label="Cuotas Vencidas" value={String(stats?.cuotas_vencidas ?? 0)} color={Colors.danger} icon="⚠️" />
-                <StatCard label="Total Cobrado" value={formatCurrency(stats?.ingresos_mes ?? 0)} color={Colors.success} icon="📈" trend="cobros acumulados" trendUp />
+                <StatCard label="Total Cobrado" value={formatCurrency(stats?.ingresos_mes ?? 0)} color={Colors.success} icon="📈" trend="cobros del mes" trendUp />
               </View>
             </View>
           ) : role === 'cajero' ? (
@@ -196,13 +200,13 @@ export default function DashboardScreen() {
                 <StatCard label="Vencen Hoy" value={String(stats?.cuotas_pendientes_hoy ?? 0)} color={Colors.warning} icon="📅" />
               </View>
               <View style={styles.statsRow}>
-                <StatCard label="En Mora" value={String(stats?.en_mora ?? 0)} color={Colors.danger} icon="🚨" />
+                <StatCard label="Cuotas Vencidas" value={String(stats?.cuotas_vencidas ?? 0)} color={Colors.danger} icon="🚨" />
               </View>
             </View>
             ) : (
             <View style={styles.statsGrid}>
               <View style={styles.statsRow}>
-                <StatCard label="Ingresos del Mes" value={formatCurrency(stats?.ingresos_contables_mes ?? 0)} color={Colors.success} icon="📈" trend="intereses + mora + comisiones" trendUp />
+                <StatCard label="Ingresos del Mes" value={formatCurrency(stats?.ingresos_contables_mes ?? 0)} color={Colors.success} icon="📈" trend="intereses + comisiones" trendUp />
                 <StatCard label="Clientes Activos" value={String(stats?.clientes_activos ?? 0)} color={Colors.info} icon="👥" />
               </View>
               <View style={styles.statsRow}>
