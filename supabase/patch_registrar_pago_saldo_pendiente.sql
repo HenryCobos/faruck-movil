@@ -31,8 +31,9 @@ DECLARE
   v_cuenta_mora     UUID;
   v_capital_part    NUMERIC;
   v_interes_part    NUMERIC;
-  v_todas_pagadas   BOOLEAN;
-  v_saldo_pendiente NUMERIC;
+  v_todas_pagadas           BOOLEAN;
+  v_saldo_pendiente         NUMERIC;
+  v_saldo_capital_pendiente NUMERIC;
 BEGIN
   -- Obtener cuota
   SELECT * INTO v_cuota FROM cuotas WHERE id = p_cuota_id FOR UPDATE;
@@ -126,24 +127,30 @@ BEGIN
     WHERE id = v_prestamo.garantia_id;
   END IF;
 
-  -- Calcular saldo pendiente DESPUÉS de marcar esta cuota como pagada:
-  -- suma de monto_total de las cuotas que aún no están pagadas.
+  -- Saldo total pendiente (capital + intereses futuros)
   SELECT COALESCE(SUM(monto_total), 0)
   INTO v_saldo_pendiente
   FROM cuotas
   WHERE prestamo_id = v_cuota.prestamo_id
     AND estado != 'pagada';
 
-  -- Retornar resultado
+  -- Saldo de capital pendiente (solo capital de cuotas no pagadas)
+  SELECT COALESCE(SUM(capital), 0)
+  INTO v_saldo_capital_pendiente
+  FROM cuotas
+  WHERE prestamo_id = v_cuota.prestamo_id
+    AND estado != 'pagada';
+
   RETURN jsonb_build_object(
-    'pago_id',           v_pago_id,
-    'recibo_num',        v_recibo_num,
-    'capital',           v_capital_part,
-    'interes',           v_interes_part,
-    'mora',              p_mora_cobrada,
-    'total',             p_monto_pagado,
-    'prestamo_cancelado', v_todas_pagadas,
-    'saldo_pendiente',   v_saldo_pendiente
+    'pago_id',                 v_pago_id,
+    'recibo_num',              v_recibo_num,
+    'capital',                 v_capital_part,
+    'interes',                 v_interes_part,
+    'mora',                    p_mora_cobrada,
+    'total',                   p_monto_pagado,
+    'prestamo_cancelado',      v_todas_pagadas,
+    'saldo_pendiente',         v_saldo_pendiente,
+    'saldo_capital_pendiente', v_saldo_capital_pendiente
   );
 END;
 $$;

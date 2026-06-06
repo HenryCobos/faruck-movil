@@ -2,7 +2,7 @@
   "expo": {
     "name": "Préstamos AB",
     "slug": "faruck-movil",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "prestamosab",
@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.faruck.prestamosab",
-      "buildNumber": "10",
+      "buildNumber": "11",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -29,7 +29,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.faruck.prestamosab",
-      "versionCode": 9,
+      "versionCode": 10,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ]

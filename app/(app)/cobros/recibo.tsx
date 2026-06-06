@@ -33,7 +33,11 @@ function generarHtmlRecibo(params: {
   fechaHora: string;
   config: Configuracion;
   saldoPendiente?: number;
+  esPagoSoloInteres?: boolean;
 }): string {
+  const saldoLabel = params.esPagoSoloInteres
+    ? 'Saldo de capital pendiente de la deuda'
+    : 'Saldo pendiente del préstamo';
   const { config } = params;
   const s = config.simbolo_moneda;
   const metodosLabel: Record<string, string> = {
@@ -175,7 +179,7 @@ function generarHtmlRecibo(params: {
       <div class="desglose-row"><span class="desglose-label">Intereses del período</span><span class="desglose-value">${s}${params.interes.toLocaleString('es', { minimumFractionDigits: 2 })}</span></div>
       ${params.saldoPendiente !== undefined ? `
       <div class="desglose-row saldo-row">
-        <span class="desglose-label saldo-label">Saldo pendiente del préstamo</span>
+        <span class="desglose-label saldo-label">${saldoLabel}</span>
         <span class="desglose-value ${params.cancelado ? 'saldo-cero' : 'saldo-monto'}">${params.cancelado ? `${s}0` : `${s}${params.saldoPendiente.toLocaleString('es', { minimumFractionDigits: 2 })}`}</span>
       </div>` : ''}
 
@@ -212,7 +216,7 @@ export default function ReciboScreen() {
   const insets = useSafeAreaInsets();
   const {
     reciboNum, clienteNombre, numeroCuota,
-    capital, interes, total, metodo, cancelado, fechaPago, modo, saldoPendiente,
+    capital, interes, total, metodo, cancelado, fechaPago, modo, saldoPendiente, soloInteres,
   } = useLocalSearchParams<Record<string, string>>();
 
   const [config, setConfig] = useState<Configuracion | null>(null);
@@ -239,6 +243,10 @@ export default function ReciboScreen() {
   const int   = Number(interes ?? 0);
   const tot   = Number(total ?? 0);
   const saldo = saldoPendiente !== undefined ? Number(saldoPendiente) : undefined;
+  const esPagoSoloInteres = soloInteres === '1';
+  const saldoLabel = esPagoSoloInteres
+    ? 'Saldo de capital pendiente de la deuda'
+    : 'Saldo pendiente del préstamo';
 
   useEffect(() => {
     configuracionService.get()
@@ -265,6 +273,7 @@ export default function ReciboScreen() {
         fechaHora,
         config,
         saldoPendiente: saldo,
+        esPagoSoloInteres,
       });
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {
@@ -374,7 +383,7 @@ export default function ReciboScreen() {
             </View>
             {saldo !== undefined && (
               <View style={[styles.desgloseRow, styles.saldoRow]}>
-                <Text style={[styles.desgloseLabel, styles.saldoLabel]}>Saldo pendiente del préstamo</Text>
+                <Text style={[styles.desgloseLabel, styles.saldoLabel]}>{saldoLabel}</Text>
                 <Text style={[styles.desgloseValue, esCancelado ? styles.saldoCero : styles.saldoMonto]}>
                   {esCancelado ? formatCurrency(0) : formatCurrency(saldo)}
                 </Text>

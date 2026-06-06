@@ -30,7 +30,7 @@ const AMORT_OPTIONS: SelectOption[] = [
 
 const schema = z.object({
   monto_principal:   z.coerce.number().min(1, 'El monto debe ser mayor a 0'),
-  tasa_mensual:      z.coerce.number().min(0.1, 'Tasa inválida').max(30, 'Tasa máxima 30%'),
+  tasa_mensual:      z.coerce.number().min(0, 'La tasa no puede ser negativa').max(30, 'Tasa máxima 30%'),
   plazo_meses:       z.coerce.number().min(1).max(120),
   tipo_amortizacion: z.enum(['francesa', 'alemana', 'solo_interes', 'anticipado', 'solo_interes_adelantado']),
   comision_apertura: z.coerce.number().min(0).optional(),
@@ -144,7 +144,8 @@ export default function RenovarPrestamoScreen() {
 
   useEffect(() => {
     const [monto, tasa, plazo, tipo] = watchedFields;
-    if (!monto || !tasa) { setPreview(null); return; }
+    const tasaNum = Number(tasa);
+    if (!monto || !Number.isFinite(tasaNum) || tasaNum < 0) { setPreview(null); return; }
     try {
       if (tipo === 'anticipado') {
         const plazoDias = calcularDiasAnticipado(fechaVencCapital);
@@ -322,8 +323,8 @@ export default function RenovarPrestamoScreen() {
                 <Controller control={control} name="tasa_mensual" render={({ field: { onChange, value } }) => (
                   <Input
                     label="Tasa Mensual (%)"
-                    placeholder="3"
-                    value={String(value || '')}
+                    placeholder="3 (0 = sin interés)"
+                    value={String(value ?? '')}
                     onChangeText={onChange}
                     keyboardType="decimal-pad"
                     error={errors.tasa_mensual?.message}
@@ -458,7 +459,7 @@ export default function RenovarPrestamoScreen() {
                 </View>
                 <View style={styles.previewStat}>
                   <Text style={[styles.previewVal, { color: Colors.info }]}>
-                    {((preview.totalIntereses / preview.totalCapital) * 100).toFixed(1)}%
+                    {((preview.totalIntereses / (preview.totalCapital || 1)) * 100).toFixed(1)}%
                   </Text>
                   <Text style={styles.previewLbl}>Costo Total</Text>
                 </View>

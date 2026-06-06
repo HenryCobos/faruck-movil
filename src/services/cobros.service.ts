@@ -28,6 +28,8 @@ export interface ResultadoPago {
   total: number;
   prestamo_cancelado: boolean;
   saldo_pendiente: number;
+  /** Capital pendiente tras el pago (cuotas no pagadas) */
+  saldo_capital_pendiente?: number;
 }
 
 export interface PagoRegistrado {

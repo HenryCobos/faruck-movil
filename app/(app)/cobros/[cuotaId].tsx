@@ -135,6 +135,7 @@ export default function RegistrarPagoScreen() {
                 observaciones: observaciones || undefined,
                 fechaPago:    fechaIso,
               });
+              const esPagoSoloInteres = resultado.capital === 0 && resultado.interes > 0;
               router.replace({
                 pathname: '/(app)/cobros/recibo',
                 params: {
@@ -147,7 +148,12 @@ export default function RegistrarPagoScreen() {
                   metodo:         metodoPago,
                   cancelado:      resultado.prestamo_cancelado ? '1' : '0',
                   fechaPago:      fechaIso,
-                  saldoPendiente: String(resultado.saldo_pendiente ?? 0),
+                  saldoPendiente: String(
+                    esPagoSoloInteres
+                      ? (resultado.saldo_capital_pendiente ?? resultado.saldo_pendiente ?? 0)
+                      : (resultado.saldo_pendiente ?? 0),
+                  ),
+                  soloInteres:    esPagoSoloInteres ? '1' : '0',
                 },
               } as any);
             } catch (e: any) {

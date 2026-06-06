@@ -446,6 +446,12 @@ export default function CreditoDetailScreen() {
     const maxCuota = cuotas.length > 0 ? Math.max(...cuotas.map((c: Cuota) => c.numero_cuota)) : 0;
     const esCancelado = prestamo.estado === 'cancelado' && cuota.numero_cuota === maxCuota;
     const fechaIso = (pago.fecha_pago ?? '').substring(0, 10);
+    const esPagoSoloInteres = Number(cuota.capital) === 0 && Number(cuota.interes) > 0;
+    const saldoCapitalPendiente = esPagoSoloInteres
+      ? cuotas
+          .filter((c: Cuota) => c.numero_cuota > cuota.numero_cuota)
+          .reduce((s: number, c: Cuota) => s + Number(c.capital), 0)
+      : 0;
 
     router.push({
       pathname: '/(app)/cobros/recibo',
@@ -460,6 +466,10 @@ export default function CreditoDetailScreen() {
         cancelado:     esCancelado ? '1' : '0',
         fechaPago:     fechaIso,
         modo:          'ver',
+        ...(esPagoSoloInteres ? {
+          saldoPendiente: String(saldoCapitalPendiente),
+          soloInteres:    '1',
+        } : {}),
       },
     } as any);
   }, [prestamo, pagos, cuotas]);
