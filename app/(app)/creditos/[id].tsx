@@ -764,6 +764,9 @@ export default function CreditoDetailScreen() {
               <InfoRow label="🔄 Renovación de" value={`#${prestamo.prestamo_padre_id.slice(-8).toUpperCase()} →`} color={Colors.info} />
             </TouchableOpacity>
           )}
+          {prestamo.observaciones?.trim() ? (
+            <InfoRow label="Observaciones" value={prestamo.observaciones.trim()} />
+          ) : null}
         </View>
 
         {/* Contrato */}
