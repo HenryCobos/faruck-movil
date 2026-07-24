@@ -30,12 +30,16 @@ export interface ResultadoPago {
   saldo_pendiente: number;
   /** Capital pendiente tras el pago (cuotas no pagadas) */
   saldo_capital_pendiente?: number;
+  solo_interes?: boolean;
+  cuota_estado?: string;
+  saldo_cuota_restante?: number;
 }
 
 export interface PagoRegistrado {
   id: string;
   cuota_id: string;
   monto_pagado: number;
+  mora_cobrada?: number;
   fecha_pago: string;
   metodo_pago: string;
   numero_recibo: string;
@@ -78,6 +82,35 @@ export const cobrosService = {
     return data as CuotaPendiente;
   },
 
+  async getPagosByCuota(cuotaId: string): Promise<PagoRegistrado[]> {
+    const { data, error } = await supabase
+      .from('pagos')
+      .select('*')
+      .eq('cuota_id', cuotaId)
+      .eq('anulado', false)
+      .order('fecha_pago', { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as PagoRegistrado[];
+  },
+
+  async getPagosByCuotaIds(cuotaIds: string[]): Promise<PagoRegistrado[]> {
+    if (cuotaIds.length === 0) return [];
+    const BATCH = 80;
+    const resultados: PagoRegistrado[] = [];
+    for (let i = 0; i < cuotaIds.length; i += BATCH) {
+      const lote = cuotaIds.slice(i, i + BATCH);
+      const { data, error } = await supabase
+        .from('pagos')
+        .select('*')
+        .in('cuota_id', lote)
+        .eq('anulado', false)
+        .order('fecha_pago', { ascending: true });
+      if (error) throw error;
+      resultados.push(...((data ?? []) as PagoRegistrado[]));
+    }
+    return resultados;
+  },
+
   async registrarPago(params: {
     cuotaId: string;
     cajeroId: string;
@@ -86,6 +119,7 @@ export const cobrosService = {
     observaciones?: string;
     /** Fecha a registrar en el recibo y en la base de datos. Por defecto: hoy. Formato YYYY-MM-DD */
     fechaPago?: string;
+    soloInteres?: boolean;
   }): Promise<ResultadoPago> {
     const { data, error } = await supabase.rpc('registrar_pago', {
       p_cuota_id:      params.cuotaId,
@@ -95,6 +129,7 @@ export const cobrosService = {
       p_metodo_pago:   params.metodoPago,
       p_observaciones: params.observaciones ?? null,
       p_fecha_pago:    params.fechaPago ?? null,
+      p_solo_interes:  params.soloInteres ?? false,
     });
     if (error) throw error;
     const resultado = data as ResultadoPago;

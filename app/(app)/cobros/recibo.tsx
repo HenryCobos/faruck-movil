@@ -396,6 +396,14 @@ export default function ReciboScreen() {
               <Text style={styles.totalMetodo}>{metodosLabel[metodo ?? 'efectivo']}</Text>
             </View>
 
+            {esPagoSoloInteres && (
+              <View style={styles.soloInteresBox}>
+                <Text style={styles.soloInteresBoxText}>
+                  Pago de intereses del periodo. El capital de esta cuota sigue pendiente.
+                </Text>
+              </View>
+            )}
+
             {/* Sello PAGADO */}
             <View style={styles.selloWrap}>
               <View style={styles.sello}>
@@ -543,6 +551,12 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-12deg' }],
   },
   selloText: { fontSize: 18, fontWeight: '900', color: Colors.success, letterSpacing: 5 },
+
+  soloInteresBox: {
+    backgroundColor: '#FEF3C7', borderRadius: 10, padding: 12, marginBottom: 10,
+    borderLeftWidth: 3, borderLeftColor: Colors.warning,
+  },
+  soloInteresBoxText: { fontSize: 12, color: '#92400E', lineHeight: 18, textAlign: 'center' },
 
   canceladoBox: {
     backgroundColor: `${Colors.success}12`, borderRadius: 14, padding: 18,

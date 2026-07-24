@@ -15,7 +15,7 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
-import { formatCurrency, parseFechaLocal } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
 
 const METODOS = [
@@ -23,6 +23,8 @@ const METODOS = [
   { label: 'Transferencia', value: 'transferencia', icon: '🏦' },
   { label: 'Cheque',        value: 'cheque',        icon: '📄' },
 ];
+
+type ModoPago = 'completa' | 'solo_interes';
 
 // ─── Helpers de fecha ─────────────────────────────────────────
 
@@ -61,9 +63,11 @@ export default function RegistrarPagoScreen() {
   const { profile } = useAuthStore();
 
   const [cuota, setCuota]               = useState<CuotaPendiente | null>(null);
+  const [pagosPrevios, setPagosPrevios] = useState<{ monto_pagado: number; mora_cobrada?: number }[]>([]);
   const [loading, setLoading]           = useState(true);
   const [saving, setSaving]             = useState(false);
   const [metodoPago, setMetodoPago]     = useState('efectivo');
+  const [modoPago, setModoPago]         = useState<ModoPago>('completa');
   const [observaciones, setObservaciones] = useState('');
 
   // ── Fecha del recibo ───────────────────────────────────────
@@ -94,8 +98,14 @@ export default function RegistrarPagoScreen() {
 
   useEffect(() => {
     if (!cuotaId) { router.canGoBack() ? router.back() : router.replace('/(app)/cobros'); return; }
-    cobrosService.getCuotaById(cuotaId)
-      .then(setCuota)
+    Promise.all([
+      cobrosService.getCuotaById(cuotaId),
+      cobrosService.getPagosByCuota(cuotaId),
+    ])
+      .then(([cuotaData, pagosData]) => {
+        setCuota(cuotaData);
+        setPagosPrevios(pagosData);
+      })
       .catch(() => { Alert.alert('Error', 'No se pudo cargar la cuota'); router.canGoBack() ? router.back() : router.replace('/(app)/cobros'); })
       .finally(() => setLoading(false));
   }, [cuotaId]);
@@ -103,7 +113,12 @@ export default function RegistrarPagoScreen() {
   if (loading) return <LoadingScreen />;
   if (!cuota) return null;
 
-  const totalPagar = cuota.monto_total;
+  const saldo = calcularSaldoRestanteCuota(cuota.capital, cuota.interes, pagosPrevios);
+  const esParcial = cuota.estado === 'parcial';
+  const permiteSoloInteres = !esParcial && cuota.capital > 0 && cuota.interes > 0 && saldo.saldoInteres > 0;
+  const totalPagar = modoPago === 'solo_interes' && permiteSoloInteres
+    ? saldo.saldoInteres
+    : saldo.saldoTotal;
   const esHoy = fechaToIso(fechaPago) === fechaToIso(new Date());
 
   const hoyRef = new Date();
@@ -118,7 +133,7 @@ export default function RegistrarPagoScreen() {
 
     Alert.alert(
       'Confirmar Pago',
-      `¿Registrar pago de ${formatCurrency(totalPagar)} para ${cuota.cliente_nombre} ${cuota.cliente_apellido}?\n\nFecha del recibo: ${fechaLabel}`,
+      `¿Registrar pago de ${formatCurrency(totalPagar)} para ${cuota.cliente_nombre} ${cuota.cliente_apellido}?${modoPago === 'solo_interes' ? '\n\n(Solo interés del periodo — el capital queda pendiente en esta cuota)' : ''}\n\nFecha del recibo: ${fechaLabel}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -134,8 +149,9 @@ export default function RegistrarPagoScreen() {
                 metodoPago:   metodoPago as any,
                 observaciones: observaciones || undefined,
                 fechaPago:    fechaIso,
+                soloInteres:  modoPago === 'solo_interes',
               });
-              const esPagoSoloInteres = resultado.capital === 0 && resultado.interes > 0;
+              const esPagoSoloInteres = resultado.solo_interes ?? (resultado.capital === 0 && resultado.interes > 0);
               router.replace({
                 pathname: '/(app)/cobros/recibo',
                 params: {
@@ -215,7 +231,59 @@ export default function RegistrarPagoScreen() {
             <LineItem label="Capital"     value={formatCurrency(cuota.capital)}     color={Colors.info} />
             <LineItem label="Interés"     value={formatCurrency(cuota.interes)}     color={Colors.accent} />
             <LineItem label="Total cuota" value={formatCurrency(cuota.monto_total)} bold />
+            {saldo.pagadoTotal > 0 && (
+              <>
+                <LineItem label="Ya pagado" value={formatCurrency(saldo.pagadoTotal)} color={Colors.success} />
+                <LineItem label="Saldo restante" value={formatCurrency(saldo.saldoTotal)} bold color={Colors.warning} />
+              </>
+            )}
           </View>
+
+          {/* Modo de pago */}
+          {(permiteSoloInteres || esParcial) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Tipo de Pago</Text>
+              {esParcial ? (
+                <View style={[styles.modoChip, styles.modoChipActive]}>
+                  <Text style={styles.modoChipTextActive}>Completar cuota · {formatCurrency(saldo.saldoTotal)} restante</Text>
+                </View>
+              ) : (
+                <View style={styles.modoRow}>
+                  <TouchableOpacity
+                    style={[styles.modoChip, modoPago === 'completa' && styles.modoChipActive]}
+                    onPress={() => setModoPago('completa')}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.modoChipText, modoPago === 'completa' && styles.modoChipTextActive]}>
+                      Cuota completa
+                    </Text>
+                    <Text style={[styles.modoChipSub, modoPago === 'completa' && styles.modoChipSubActive]}>
+                      {formatCurrency(saldo.saldoTotal)}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modoChip, modoPago === 'solo_interes' && styles.modoChipActive]}
+                    onPress={() => setModoPago('solo_interes')}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.modoChipText, modoPago === 'solo_interes' && styles.modoChipTextActive]}>
+                      Solo interés
+                    </Text>
+                    <Text style={[styles.modoChipSub, modoPago === 'solo_interes' && styles.modoChipSubActive]}>
+                      {formatCurrency(saldo.saldoInteres)}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {modoPago === 'solo_interes' && permiteSoloInteres && (
+                <View style={styles.soloInteresBanner}>
+                  <Text style={styles.soloInteresBannerText}>
+                    El capital de esta cuota ({formatCurrency(saldo.saldoCapital)}) quedará pendiente hasta un pago posterior.
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* ── Fecha del recibo ── */}
           <TouchableOpacity
@@ -356,6 +424,24 @@ const styles = StyleSheet.create({
   lineLabel: { fontSize: 13, color: Colors.muted, flex: 1 },
   lineValue: { fontSize: 13, fontWeight: '600', color: Colors.text },
   lineBold: { fontSize: 15, fontWeight: '800' },
+
+  modoRow: { flexDirection: 'row', gap: 10 },
+  modoChip: {
+    flex: 1, borderRadius: 12, padding: 14, gap: 4,
+    backgroundColor: Colors.background, borderWidth: 1.5, borderColor: Colors.border,
+  },
+  modoChipActive: {
+    backgroundColor: `${Colors.primary}12`, borderColor: Colors.primary,
+  },
+  modoChipText: { fontSize: 13, fontWeight: '700', color: Colors.muted, textAlign: 'center' },
+  modoChipTextActive: { color: Colors.primary },
+  modoChipSub: { fontSize: 12, fontWeight: '600', color: Colors.muted, textAlign: 'center' },
+  modoChipSubActive: { color: Colors.accent },
+  soloInteresBanner: {
+    marginTop: 10, backgroundColor: '#FEF3C7', borderRadius: 10, padding: 12,
+    borderLeftWidth: 3, borderLeftColor: Colors.warning,
+  },
+  soloInteresBannerText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
 
   // Fecha del recibo
   fechaReciboCard: {

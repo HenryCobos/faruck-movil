@@ -325,6 +325,55 @@ function round(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+export interface SaldoRestanteCuota {
+  saldoInteres: number;
+  saldoCapital: number;
+  saldoTotal: number;
+  pagadoTotal: number;
+}
+
+/** Simula pagos vigentes con asignación interés-primero (igual que el RPC). */
+export function calcularSaldoRestanteCuota(
+  capital: number,
+  interes: number,
+  pagos: { monto_pagado: number; mora_cobrada?: number }[],
+): SaldoRestanteCuota {
+  let saldoInt = interes;
+  let saldoCap = capital;
+  let pagadoTotal = 0;
+
+  for (const pago of pagos) {
+    pagadoTotal += pago.monto_pagado;
+    const montoNeto = Math.max(pago.monto_pagado - (pago.mora_cobrada ?? 0), 0);
+    const aInteres = Math.min(montoNeto, saldoInt);
+    saldoInt = Math.max(saldoInt - aInteres, 0);
+    const aCapital = Math.min(montoNeto - aInteres, saldoCap);
+    saldoCap = Math.max(saldoCap - aCapital, 0);
+  }
+
+  return {
+    saldoInteres: round(saldoInt),
+    saldoCapital: round(saldoCap),
+    saldoTotal: round(saldoInt + saldoCap),
+    pagadoTotal: round(pagadoTotal),
+  };
+}
+
+/** Asignación interés-primero de un pago sobre saldos restantes. */
+export function calcularAsignacionPago(
+  capital: number,
+  interes: number,
+  pagosPrevios: { monto_pagado: number; mora_cobrada?: number }[],
+  montoPago: number,
+  moraCobrada = 0,
+): { capitalPart: number; interesPart: number } {
+  const saldo = calcularSaldoRestanteCuota(capital, interes, pagosPrevios);
+  const montoNeto = Math.max(montoPago - moraCobrada, 0);
+  const interesPart = Math.min(montoNeto, saldo.saldoInteres);
+  const capitalPart = Math.min(montoNeto - interesPart, saldo.saldoCapital);
+  return { capitalPart: round(capitalPart), interesPart: round(interesPart) };
+}
+
 /** Fecha calendario local (evita desfases por ISO UTC en strings YYYY-MM-DD). */
 function inicioDiaLocal(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());

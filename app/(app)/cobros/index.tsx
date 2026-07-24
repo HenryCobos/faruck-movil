@@ -11,27 +11,34 @@ import { SearchBar } from '@/components/ui/SearchBar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
-import { formatCurrency, parseFechaLocal } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
+
+export interface CuotaPendienteConSaldo extends CuotaPendiente {
+  saldoRestante: number;
+}
 
 function getLocalHoy(): string {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
 }
 
-function CuotaCard({ item }: { item: CuotaPendiente }) {
+function CuotaCard({ item }: { item: CuotaPendienteConSaldo }) {
   const hoy = getLocalHoy();
-  const isVencida = item.fecha_vencimiento < hoy;
+  const isVencida = item.fecha_vencimiento < hoy && item.estado !== 'parcial';
+  const isParcial = item.estado === 'parcial';
+  const badgeLabel = isParcial ? 'Parcial' : isVencida ? 'Vencida' : 'Pendiente';
+  const badgeVariant = isParcial ? 'warning' : isVencida ? 'danger' : 'default';
 
   return (
     <TouchableOpacity
-      style={[styles.card, isVencida && styles.cardVencida]}
+      style={[styles.card, isVencida && styles.cardVencida, isParcial && styles.cardParcial]}
       onPress={() => router.push(`/(app)/cobros/${item.id}` as any)}
       activeOpacity={0.7}
     >
       <View style={styles.cardLeft}>
-        <View style={[styles.cuotaBadge, { backgroundColor: isVencida ? Colors.danger + '20' : Colors.accent + '20' }]}>
-          <Text style={[styles.cuotaNum, { color: isVencida ? Colors.danger : Colors.accent }]}>
+        <View style={[styles.cuotaBadge, { backgroundColor: isVencida ? Colors.danger + '20' : isParcial ? Colors.warning + '20' : Colors.accent + '20' }]}>
+          <Text style={[styles.cuotaNum, { color: isVencida ? Colors.danger : isParcial ? Colors.warning : Colors.accent }]}>
             #{item.numero_cuota}
           </Text>
         </View>
@@ -49,13 +56,19 @@ function CuotaCard({ item }: { item: CuotaPendiente }) {
         {isVencida && (
           <Text style={styles.vencidaLabel}>⚠️ Cuota vencida</Text>
         )}
+        {isParcial && (
+          <Text style={styles.parcialLabel}>⏳ Interés pagado — falta capital</Text>
+        )}
       </View>
 
       <View style={styles.cardRight}>
-        <Text style={[styles.total, isVencida && styles.totalVencida]}>
-          {formatCurrency(item.monto_total)}
+        <Text style={[styles.total, isVencida && styles.totalVencida, isParcial && styles.totalParcial]}>
+          {formatCurrency(item.saldoRestante)}
         </Text>
-        <Badge label={isVencida ? 'Vencida' : 'Pendiente'} variant={isVencida ? 'danger' : 'default'} />
+        {isParcial && item.saldoRestante < item.monto_total && (
+          <Text style={styles.totalOriginal}>{formatCurrency(item.monto_total)}</Text>
+        )}
+        <Badge label={badgeLabel} variant={badgeVariant as any} />
       </View>
     </TouchableOpacity>
   );
@@ -63,8 +76,8 @@ function CuotaCard({ item }: { item: CuotaPendiente }) {
 
 export default function CobrosScreen() {
   const insets = useSafeAreaInsets();
-  const [cuotas, setCuotas] = useState<CuotaPendiente[]>([]);
-  const [filtered, setFiltered] = useState<CuotaPendiente[]>([]);
+  const [cuotas, setCuotas] = useState<CuotaPendienteConSaldo[]>([]);
+  const [filtered, setFiltered] = useState<CuotaPendienteConSaldo[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,9 +88,40 @@ export default function CobrosScreen() {
   const load = useCallback(async () => {
     try {
       const data = await cobrosService.getCuotasPendientes();
-      setCuotas(data);
-    } catch {
-      Alert.alert('Error de conexión', 'No se pudieron cargar las cuotas. Verifica tu conexión e intenta nuevamente.');
+
+      const idsParciales = data.filter(c => c.estado === 'parcial').map(c => c.id);
+      let pagosPorCuota: Record<string, { monto_pagado: number; mora_cobrada?: number }[]> = {};
+
+      if (idsParciales.length > 0) {
+        try {
+          const pagos = await cobrosService.getPagosByCuotaIds(idsParciales);
+          pagosPorCuota = pagos.reduce<typeof pagosPorCuota>((acc, p) => {
+            (acc[p.cuota_id] ??= []).push(p);
+            return acc;
+          }, {});
+        } catch (pagosErr: unknown) {
+          console.error('[Cobros] Error cargando pagos de cuotas parciales:', pagosErr);
+        }
+      }
+
+      const conSaldo: CuotaPendienteConSaldo[] = data.map(c => {
+        if (c.estado !== 'parcial') {
+          return { ...c, saldoRestante: c.monto_total };
+        }
+        const pv = pagosPorCuota[c.id] ?? [];
+        const saldo = calcularSaldoRestanteCuota(c.capital, c.interes, pv);
+        return { ...c, saldoRestante: saldo.saldoTotal > 0 ? saldo.saldoTotal : c.monto_total };
+      });
+      setCuotas(conSaldo);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      console.error('[Cobros] Error cargando cuotas pendientes:', err);
+      Alert.alert(
+        'Error al cargar cobros',
+        msg.includes('tardó demasiado')
+          ? `${msg}\n\nVerifica tu conexión e intenta nuevamente.`
+          : `No se pudieron cargar las cuotas.\n\n${msg}`,
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -114,7 +158,7 @@ export default function CobrosScreen() {
     total: cuotas.length,
     vencidas: cuotas.filter(c => c.fecha_vencimiento < hoy).length,
     hoy: cuotas.filter(c => c.fecha_vencimiento === hoy).length,
-    montoPendiente: cuotas.reduce((s, c) => s + c.monto_total, 0),
+    montoPendiente: cuotas.reduce((s, c) => s + c.saldoRestante, 0),
   };
 
   if (loading) return <LoadingScreen label="Cargando cobros..." />;
@@ -188,6 +232,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
   },
   cardVencida: { borderLeftWidth: 3, borderLeftColor: Colors.danger },
+  cardParcial: { borderLeftWidth: 3, borderLeftColor: Colors.warning },
   cardLeft: { flexShrink: 0 },
   cuotaBadge: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   cuotaNum: { fontSize: 13, fontWeight: '800' },
@@ -197,8 +242,11 @@ const styles = StyleSheet.create({
   clienteDoc: { fontSize: 11, color: Colors.muted },
   vencimiento: { fontSize: 11, color: Colors.muted },
   vencidaLabel: { fontSize: 11, color: Colors.danger, fontWeight: '600' },
+  parcialLabel: { fontSize: 11, color: Colors.warning, fontWeight: '600' },
   cardRight: { alignItems: 'flex-end', gap: 4 },
   total: { fontSize: 16, fontWeight: '800', color: Colors.text },
   totalVencida: { color: Colors.danger },
+  totalParcial: { color: Colors.warning },
+  totalOriginal: { fontSize: 10, color: Colors.muted, textDecorationLine: 'line-through' },
   moraAmount: { fontSize: 10, color: Colors.danger, fontWeight: '600' },
 });

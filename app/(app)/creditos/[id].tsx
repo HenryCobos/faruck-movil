@@ -23,7 +23,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Colors } from '@/constants/colors';
 import { Cuota, CuotaEstado, AbonoCapital } from '@/types';
-import { formatCurrency, parseFechaLocal } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota, calcularAsignacionPago } from '@/utils/amortizacion';
 
 const ESTADO_VARIANT: Record<string, any> = {
   solicitado: 'warning', aprobado: 'info', activo: 'success',
@@ -62,14 +62,31 @@ function InfoRow({ label, value, color }: { label: string; value: string; color?
   );
 }
 
-function CuotaRow({ cuota, onVerRecibo }: { cuota: Cuota; onVerRecibo?: () => void }) {
+function CuotaRow({
+  cuota,
+  pagosCuota,
+  onVerRecibo,
+}: {
+  cuota: Cuota;
+  pagosCuota?: PagoRegistrado[];
+  onVerRecibo?: () => void;
+}) {
   const isPaid    = cuota.estado === 'pagada';
+  const isParcial = cuota.estado === 'parcial';
   const isVencida = cuota.estado === 'vencida';
-  const canPay    = cuota.estado === 'pendiente' || cuota.estado === 'vencida';
+  const canPay    = cuota.estado === 'pendiente' || cuota.estado === 'vencida' || isParcial;
+
+  const pagosVigentes = (pagosCuota ?? []).filter(p => !p.anulado);
+  const saldo = calcularSaldoRestanteCuota(
+    Number(cuota.capital),
+    Number(cuota.interes),
+    pagosVigentes,
+  );
+  const montoMostrar = isPaid ? cuota.monto_total : saldo.saldoTotal;
 
   const content = (
     <>
-      <View style={[styles.cuotaNum, { backgroundColor: isPaid ? Colors.success : isVencida ? Colors.danger : Colors.primaryLight }]}>
+      <View style={[styles.cuotaNum, { backgroundColor: isPaid ? Colors.success : isVencida ? Colors.danger : isParcial ? Colors.warning + '33' : Colors.primaryLight }]}>
         <Text style={styles.cuotaNumText}>{cuota.numero_cuota}</Text>
       </View>
       <View style={styles.cuotaData}>
@@ -80,11 +97,16 @@ function CuotaRow({ cuota, onVerRecibo }: { cuota: Cuota; onVerRecibo?: () => vo
           <Text style={[styles.cuotaDetail, { color: Colors.info }]}>Cap: {formatCurrency(cuota.capital)}</Text>
           <Text style={[styles.cuotaDetail, { color: Colors.accent }]}>Int: {formatCurrency(cuota.interes)}</Text>
         </View>
+        {isParcial && (
+          <Text style={styles.cuotaParcialHint}>
+            Restante: {formatCurrency(saldo.saldoTotal)} (Cap {formatCurrency(saldo.saldoCapital)})
+          </Text>
+        )}
       </View>
       <View style={styles.cuotaRight}>
-        <Text style={[styles.cuotaTotal, isPaid && styles.cuotaTotalPaid]}>{formatCurrency(cuota.monto_total)}</Text>
+        <Text style={[styles.cuotaTotal, isPaid && styles.cuotaTotalPaid]}>{formatCurrency(montoMostrar)}</Text>
         <Badge label={CUOTA_LABEL[cuota.estado]} variant={CUOTA_VARIANT[cuota.estado]} />
-        {canPay && <Text style={styles.cuotaPayHint}>Tap para pagar →</Text>}
+        {canPay && <Text style={styles.cuotaPayHint}>{isParcial ? 'Completar cuota →' : 'Tap para pagar →'}</Text>}
         {isPaid && onVerRecibo && <Text style={styles.cuotaReciboHint}>📄 Ver recibo</Text>}
       </View>
     </>
@@ -93,7 +115,7 @@ function CuotaRow({ cuota, onVerRecibo }: { cuota: Cuota; onVerRecibo?: () => vo
   if (canPay) {
     return (
       <TouchableOpacity
-        style={[styles.cuotaRow, isVencida && styles.cuotaRowVencida, styles.cuotaRowTappable]}
+        style={[styles.cuotaRow, isVencida && styles.cuotaRowVencida, isParcial && styles.cuotaRowParcial, styles.cuotaRowTappable]}
         onPress={() => router.push(`/(app)/cobros/${cuota.id}` as any)}
         activeOpacity={0.7}
       >
@@ -434,23 +456,38 @@ export default function CreditoDetailScreen() {
   // ── Hooks de navegación a recibo histórico ────────────────
   // IMPORTANTE: deben ir ANTES de cualquier early return para no violar las Rules of Hooks.
 
-  const verReciboCuota = useCallback((cuota: Cuota) => {
+  const verReciboCuota = useCallback((cuota: Cuota, pagoObjetivo?: PagoRegistrado) => {
     if (!prestamo) return;
-    const pago = pagos.find(p => p.cuota_id === cuota.id && !p.anulado);
+    const pagosCuota = pagos
+      .filter(p => p.cuota_id === cuota.id && !p.anulado)
+      .sort((a, b) => a.fecha_pago.localeCompare(b.fecha_pago));
+    const pago = pagoObjetivo ?? pagosCuota[0];
     if (!pago) {
       Alert.alert('Sin recibo', 'No se encontró un pago registrado para esta cuota.');
       return;
     }
+    const pagosPrevios = pagosCuota.filter(p => p.fecha_pago < pago.fecha_pago || (p.fecha_pago === pago.fecha_pago && p.id < pago.id));
+    const { capitalPart, interesPart } = calcularAsignacionPago(
+      Number(cuota.capital),
+      Number(cuota.interes),
+      pagosPrevios,
+      Number(pago.monto_pagado),
+      Number(pago.mora_cobrada ?? 0),
+    );
     const clienteDatos = prestamo.clientes;
     const clienteNombre = clienteDatos ? `${clienteDatos.nombre} ${clienteDatos.apellido}` : '';
     const maxCuota = cuotas.length > 0 ? Math.max(...cuotas.map((c: Cuota) => c.numero_cuota)) : 0;
     const esCancelado = prestamo.estado === 'cancelado' && cuota.numero_cuota === maxCuota;
     const fechaIso = (pago.fecha_pago ?? '').substring(0, 10);
-    const esPagoSoloInteres = Number(cuota.capital) === 0 && Number(cuota.interes) > 0;
+    const esPagoSoloInteres = capitalPart === 0 && interesPart > 0;
     const saldoCapitalPendiente = esPagoSoloInteres
       ? cuotas
-          .filter((c: Cuota) => c.numero_cuota > cuota.numero_cuota)
-          .reduce((s: number, c: Cuota) => s + Number(c.capital), 0)
+          .filter((c: Cuota) => c.estado !== 'pagada')
+          .reduce((s: number, c: Cuota) => {
+            const pv = pagos.filter(p => p.cuota_id === c.id && !p.anulado);
+            const sr = calcularSaldoRestanteCuota(Number(c.capital), Number(c.interes), pv);
+            return s + sr.saldoCapital;
+          }, 0)
       : 0;
 
     router.push({
@@ -459,8 +496,8 @@ export default function CreditoDetailScreen() {
         reciboNum:     pago.numero_recibo,
         clienteNombre,
         numeroCuota:   String(cuota.numero_cuota),
-        capital:       String(cuota.capital),
-        interes:       String(cuota.interes),
+        capital:       String(capitalPart),
+        interes:       String(interesPart),
         total:         String(pago.monto_pagado),
         metodo:        pago.metodo_pago,
         cancelado:     esCancelado ? '1' : '0',
@@ -477,7 +514,7 @@ export default function CreditoDetailScreen() {
   const verReciboPago = useCallback((pago: PagoRegistrado) => {
     const cuota = cuotas.find((c: Cuota) => c.id === pago.cuota_id);
     if (!cuota) return;
-    verReciboCuota(cuota);
+    verReciboCuota(cuota, pago);
   }, [cuotas, verReciboCuota]);
 
   // ── Early returns ─────────────────────────────────────────
@@ -835,6 +872,7 @@ export default function CreditoDetailScreen() {
               <CuotaRow
                 key={cuota.id}
                 cuota={cuota}
+                pagosCuota={pagos.filter((p: PagoRegistrado) => p.cuota_id === cuota.id)}
                 onVerRecibo={cuota.estado === 'pagada' ? () => verReciboCuota(cuota) : undefined}
               />
             ))}
@@ -1373,6 +1411,7 @@ const styles = StyleSheet.create({
   },
   cuotaRowPaid: { opacity: 0.6 },
   cuotaRowVencida: { borderLeftWidth: 3, borderLeftColor: Colors.danger },
+  cuotaRowParcial: { borderLeftWidth: 3, borderLeftColor: Colors.warning },
   cuotaNum: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   cuotaNumText: { fontSize: 12, fontWeight: '800', color: Colors.white },
   cuotaData: { flex: 1, gap: 3 },
@@ -1390,6 +1429,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: `${Colors.accent}30`,
   },
   cuotaPayHint: { fontSize: 9, color: Colors.accent, fontWeight: '700', marginTop: 2 },
+  cuotaParcialHint: { fontSize: 10, color: Colors.warning, fontWeight: '600', marginTop: 3 },
   cuotaReciboHint: { fontSize: 9, color: Colors.success, fontWeight: '700', marginTop: 2 },
   pagosSection: { gap: 6, marginTop: 4 },
   pagoRow: {
