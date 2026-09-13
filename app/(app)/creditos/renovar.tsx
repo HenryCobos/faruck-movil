@@ -39,6 +39,16 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+function mensajeErrorRenovacion(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error ?? '');
+  if (msg.includes('pagos_cuota_id_fkey')) {
+    return 'No se pudo cerrar el préstamo porque tiene cuotas con pagos registrados. '
+      + 'Actualiza la base de datos con el parche patch_renovacion_cuotas_parciales.sql '
+      + 'o contacta al administrador.';
+  }
+  return msg || 'No se pudo renovar el préstamo';
+}
+
 export default function RenovarPrestamoScreen() {
   const { prestamoId } = useLocalSearchParams<{ prestamoId: string }>();
   const insets = useSafeAreaInsets();
@@ -221,7 +231,7 @@ export default function RenovarPrestamoScreen() {
               }, profile.id);
               router.replace(`/(app)/creditos/${nuevo.id}` as any);
             } catch (e: any) {
-              Alert.alert('Error', e.message ?? 'No se pudo renovar el préstamo');
+              Alert.alert('Error', mensajeErrorRenovacion(e));
             } finally {
               setSaving(false);
             }
@@ -238,6 +248,7 @@ export default function RenovarPrestamoScreen() {
   const garantia = prestamo.garantias;
   const esActivo = prestamo.estado === 'activo';
   const cuotasPagadas = cuotas.filter(c => c.estado === 'pagada').length;
+  const tieneCuotasParciales = cuotas.some(c => c.estado === 'parcial');
 
   return (
     <View style={styles.screen}>
@@ -298,6 +309,16 @@ export default function RenovarPrestamoScreen() {
                     El nuevo préstamo fue pre-cargado con este monto. Puedes ajustarlo.
                   </Text>
                 </View>
+              </View>
+            )}
+
+            {esActivo && tieneCuotasParciales && (
+              <View style={styles.parcialBanner}>
+                <Text style={styles.parcialBannerIcon}>ℹ️</Text>
+                <Text style={styles.parcialBannerText}>
+                  Este préstamo tiene cuotas con pago parcial. Al renovar, el capital pendiente
+                  pasará al nuevo préstamo y el historial de pagos se conservará.
+                </Text>
               </View>
             )}
           </View>
@@ -545,6 +566,18 @@ const styles = StyleSheet.create({
   saldoBannerTitle:  { fontSize: 11, fontWeight: '700', color: Colors.warning },
   saldoBannerAmount: { fontSize: 17, fontWeight: '900', color: Colors.white },
   saldoBannerHint:   { fontSize: 10, color: 'rgba(255,255,255,0.6)', lineHeight: 15 },
+
+  parcialBanner: {
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 10, padding: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    marginTop: 4,
+  },
+  parcialBannerIcon: { fontSize: 16, marginTop: 1 },
+  parcialBannerText: {
+    flex: 1, fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 16,
+  },
 
   // ── Form section ─────────────────────────────────────────────────────────
   section: {

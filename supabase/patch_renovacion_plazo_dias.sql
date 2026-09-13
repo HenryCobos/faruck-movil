@@ -35,9 +35,26 @@ BEGIN
   UPDATE prestamos SET estado = 'renovado' WHERE id = p_prestamo_anterior_id;
 
   IF v_anterior.estado = 'activo' THEN
-    DELETE FROM cuotas
-    WHERE prestamo_id = p_prestamo_anterior_id
-      AND estado IN ('pendiente', 'vencida', 'parcial');
+    -- Cuotas con pagos vigentes: cerrar, no borrar (respeta FK pagos_cuota_id_fkey)
+    UPDATE cuotas c
+    SET
+      estado     = 'pagada',
+      fecha_pago = COALESCE(c.fecha_pago, CURRENT_DATE)
+    WHERE c.prestamo_id = p_prestamo_anterior_id
+      AND c.estado IN ('pendiente', 'vencida', 'parcial')
+      AND EXISTS (
+        SELECT 1 FROM pagos p
+        WHERE p.cuota_id = c.id AND NOT p.anulado
+      );
+
+    -- Cuotas sin pagos: eliminar (comportamiento previo)
+    DELETE FROM cuotas c
+    WHERE c.prestamo_id = p_prestamo_anterior_id
+      AND c.estado IN ('pendiente', 'vencida', 'parcial')
+      AND NOT EXISTS (
+        SELECT 1 FROM pagos p
+        WHERE p.cuota_id = c.id AND NOT p.anulado
+      );
   ELSE
     UPDATE garantias SET estado = 'en_garantia' WHERE id = v_anterior.garantia_id;
   END IF;

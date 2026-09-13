@@ -42,6 +42,7 @@ FROM cuotas c
 JOIN  prestamos p  ON p.id  = c.prestamo_id
 JOIN  clientes  cl ON cl.id = p.cliente_id
 LEFT JOIN garantias g  ON g.id  = p.garantia_id
-WHERE c.estado IN ('pendiente', 'vencida', 'parcial');
+WHERE c.estado IN ('pendiente', 'vencida', 'parcial')
+  AND p.estado = 'activo';
 
 GRANT SELECT ON v_cuotas_pendientes TO authenticated;

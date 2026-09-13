@@ -13,6 +13,7 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Colors } from '@/constants/colors';
+import { formatCurrency } from '@/utils/amortizacion';
 import { Cliente, Prestamo, ClienteEstado } from '@/types';
 
 const ESTADO_VARIANT: Record<ClienteEstado, any> = {
@@ -169,6 +170,10 @@ export default function ClienteDetailScreen() {
 
   const initials = `${cliente.nombre[0]}${cliente.apellido[0]}`.toUpperCase();
   const sc = scoringColor(cliente.scoring);
+  const prestamosActivos = prestamos.filter(p => p.estado === 'activo');
+  const totalCarteraActiva = prestamosActivos.reduce(
+    (sum, p) => sum + Number(p.monto_principal ?? 0), 0,
+  );
 
   return (
     <View style={styles.screen}>
@@ -292,6 +297,15 @@ export default function ClienteDetailScreen() {
           <Text style={styles.loansSectionTitle}>
             💰 Préstamos ({prestamos.length})
           </Text>
+          {prestamosActivos.length > 0 && (
+            <View style={styles.carteraResumen}>
+              <Text style={styles.carteraLabel}>Cartera activa</Text>
+              <Text style={styles.carteraMonto}>{formatCurrency(totalCarteraActiva)}</Text>
+              <Text style={styles.carteraSub}>
+                {prestamosActivos.length} préstamo{prestamosActivos.length !== 1 ? 's' : ''} activo{prestamosActivos.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
+          )}
           {prestamos.length === 0 ? (
             <View style={styles.noLoans}>
               <Text style={styles.noLoansText}>Este cliente no tiene préstamos registrados</Text>
@@ -413,6 +427,16 @@ const styles = StyleSheet.create({
     alignItems: 'center', gap: 12,
   },
   noLoansText: { fontSize: 14, color: Colors.muted, textAlign: 'center' },
+  carteraResumen: {
+    backgroundColor: `${Colors.success}12`, borderRadius: 12, padding: 14, gap: 2,
+    borderLeftWidth: 3, borderLeftColor: Colors.success,
+  },
+  carteraLabel: {
+    fontSize: 11, fontWeight: '700', color: Colors.success,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  carteraMonto: { fontSize: 22, fontWeight: '900', color: Colors.text },
+  carteraSub: { fontSize: 12, color: Colors.muted, marginTop: 2 },
   newLoanCard: {
     borderWidth: 1.5, borderColor: Colors.accent, borderStyle: 'dashed',
     borderRadius: 10, paddingVertical: 12, paddingHorizontal: 24,
