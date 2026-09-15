@@ -359,6 +359,31 @@ export function calcularSaldoRestanteCuota(
   };
 }
 
+export type CuotaSaldoInput = {
+  estado: string;
+  capital: number;
+  interes: number;
+  pagos?: Array<{ monto_pagado: number; mora_cobrada?: number; anulado?: boolean }>;
+};
+
+/** Capital pendiente del préstamo (cuotas no pagadas; parcial con asignación interés-primero). */
+export function calcularSaldoCapitalPendientePrestamo(cuotas: CuotaSaldoInput[]): number {
+  return cuotas
+    .filter(c => c.estado !== 'pagada')
+    .reduce((s, c) => {
+      if (c.estado === 'parcial') {
+        const pagos = (c.pagos ?? [])
+          .filter(p => !p.anulado)
+          .map(p => ({
+            monto_pagado: Number(p.monto_pagado),
+            mora_cobrada: Number(p.mora_cobrada ?? 0),
+          }));
+        return s + calcularSaldoRestanteCuota(Number(c.capital), Number(c.interes), pagos).saldoCapital;
+      }
+      return s + Number(c.capital);
+    }, 0);
+}
+
 /** Asignación interés-primero de un pago sobre saldos restantes. */
 export function calcularAsignacionPago(
   capital: number,

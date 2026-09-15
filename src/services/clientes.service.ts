@@ -75,13 +75,24 @@ export const clientesService = {
   },
 
   async getPrestamos(clienteId: string) {
-    const { data, error } = await supabase
+    const withCuotas = await supabase
+      .from('prestamos')
+      .select(`
+        *,
+        garantias(tipo, descripcion),
+        cuotas(estado, capital, interes, pagos(monto_pagado, mora_cobrada, anulado))
+      `)
+      .eq('cliente_id', clienteId)
+      .order('created_at', { ascending: false });
+    if (!withCuotas.error) return withCuotas.data ?? [];
+
+    const fallback = await supabase
       .from('prestamos')
       .select('*, garantias(tipo, descripcion)')
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data ?? [];
+    if (fallback.error) throw fallback.error;
+    return fallback.data ?? [];
   },
 
   async eliminar(id: string): Promise<void> {

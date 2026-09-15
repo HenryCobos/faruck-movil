@@ -13,7 +13,7 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Colors } from '@/constants/colors';
-import { formatCurrency } from '@/utils/amortizacion';
+import { calcularSaldoCapitalPendientePrestamo, formatCurrency } from '@/utils/amortizacion';
 import { Cliente, Prestamo, ClienteEstado } from '@/types';
 
 const ESTADO_VARIANT: Record<ClienteEstado, any> = {
@@ -38,6 +38,12 @@ function scoringColor(s: number) {
   if (s >= 75) return Colors.success;
   if (s >= 50) return Colors.warning;
   return Colors.danger;
+}
+
+function saldoCapitalActivo(p: Prestamo & { cuotas?: Parameters<typeof calcularSaldoCapitalPendientePrestamo>[0] }): number {
+  const cuotas = p.cuotas;
+  if (!cuotas?.length) return Number(p.monto_principal ?? 0);
+  return calcularSaldoCapitalPendientePrestamo(cuotas);
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -172,7 +178,7 @@ export default function ClienteDetailScreen() {
   const sc = scoringColor(cliente.scoring);
   const prestamosActivos = prestamos.filter(p => p.estado === 'activo');
   const totalCarteraActiva = prestamosActivos.reduce(
-    (sum, p) => sum + Number(p.monto_principal ?? 0), 0,
+    (sum, p) => sum + saldoCapitalActivo(p), 0,
   );
 
   return (
@@ -302,7 +308,7 @@ export default function ClienteDetailScreen() {
               <Text style={styles.carteraLabel}>Cartera activa</Text>
               <Text style={styles.carteraMonto}>{formatCurrency(totalCarteraActiva)}</Text>
               <Text style={styles.carteraSub}>
-                {prestamosActivos.length} préstamo{prestamosActivos.length !== 1 ? 's' : ''} activo{prestamosActivos.length !== 1 ? 's' : ''}
+                Capital pendiente total · {prestamosActivos.length} préstamo{prestamosActivos.length !== 1 ? 's' : ''} activo{prestamosActivos.length !== 1 ? 's' : ''}
               </Text>
             </View>
           )}
@@ -317,7 +323,13 @@ export default function ClienteDetailScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            prestamos.map((p: any) => (
+            prestamos.map((p: any) => {
+              const esActivo = p.estado === 'activo';
+              const saldoCapital = esActivo ? saldoCapitalActivo(p) : null;
+              const montoOriginal = Number(p.monto_principal ?? 0);
+              const muestraOriginal = esActivo && saldoCapital != null && saldoCapital < montoOriginal - 0.01;
+
+              return (
               <TouchableOpacity
                 key={p.id}
                 style={styles.loanCard}
@@ -325,15 +337,21 @@ export default function ClienteDetailScreen() {
                 activeOpacity={0.7}
               >
                 <View style={styles.loanRow}>
-                  <Text style={styles.loanAmount}>${p.monto_principal?.toLocaleString('es')}</Text>
+                  <Text style={styles.loanAmount}>
+                    {esActivo ? formatCurrency(saldoCapital!) : `$${montoOriginal.toLocaleString('es')}`}
+                  </Text>
                   <Badge label={p.estado} variant={PRESTAMO_ESTADO_VARIANT[p.estado] ?? 'default'} />
                 </View>
+                {muestraOriginal && (
+                  <Text style={styles.loanOriginal}>Original: {formatCurrency(montoOriginal)}</Text>
+                )}
                 <Text style={styles.loanSub}>
                   {p.garantias?.tipo} · {p.plazo_meses} meses · {(p.tasa_mensual * 100).toFixed(1)}% mensual
                 </Text>
                 <Text style={styles.loanDate}>{new Date(p.created_at).toLocaleDateString('es')}</Text>
               </TouchableOpacity>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -450,6 +468,7 @@ const styles = StyleSheet.create({
   },
   loanRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   loanAmount: { fontSize: 18, fontWeight: '800', color: Colors.text },
+  loanOriginal: { fontSize: 11, color: Colors.muted, marginTop: -2 },
   loanSub: { fontSize: 12, color: Colors.muted, textTransform: 'capitalize' },
   loanDate: { fontSize: 11, color: Colors.muted },
 });
