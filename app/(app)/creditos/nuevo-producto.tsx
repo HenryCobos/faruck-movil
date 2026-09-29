@@ -18,12 +18,20 @@ import { Button } from '@/components/ui/Button';
 import { Select, SelectOption } from '@/components/ui/Select';
 import { Colors } from '@/constants/colors';
 import { calcularAmortizacionFrancesa, formatCurrency } from '@/utils/amortizacion';
+import { FRECUENCIA_COBRO_OPTIONS, type FrecuenciaCobro } from '@/utils/frecuenciaCobro';
+import {
+  cronogramaManualToResumen,
+  filasToCronogramaJson,
+  type CuotaManualFila,
+} from '@/utils/cronogramaManual';
+import { CronogramaManualEditor, cronogramaManualValido } from '@/components/creditos/CronogramaManualEditor';
 
 const schema = z.object({
   cliente_id: z.string().min(1, 'Selecciona el cliente'),
   descripcion_producto: z.string().min(3, 'Describe el producto (mínimo 3 caracteres)'),
   monto_principal: z.coerce.number().min(1, 'Monto mínimo $1'),
-  plazo_meses: z.coerce.number().int().min(1, 'Mínimo 1 cuota').max(360, 'Máximo 360 cuotas'),
+  plazo_meses: z.coerce.number().int().min(1, 'Mínimo 1 cuota').max(520, 'Máximo 520 cuotas'),
+  frecuencia_cobro: z.enum(['mensual', 'quincenal', 'semanal']).default('mensual'),
   garantia_id: z.string().optional(),
   observaciones: z.string().optional(),
 });
@@ -65,6 +73,8 @@ export default function NuevoCreditoProductoScreen() {
     return now;
   });
   const [showDateModal, setShowDateModal] = useState(false);
+  const [personalizarCuotas, setPersonalizarCuotas] = useState(false);
+  const [filasManual, setFilasManual] = useState<CuotaManualFila[]>([]);
 
   const pickerFechaValue = useMemo(
     () => normalizarFecha(fechaInicioDraft),
@@ -108,6 +118,7 @@ export default function NuevoCreditoProductoScreen() {
       descripcion_producto: '',
       monto_principal: 0,
       plazo_meses: 1,
+      frecuencia_cobro: 'mensual',
       garantia_id: '',
       observaciones: '',
     },
@@ -119,6 +130,7 @@ export default function NuevoCreditoProductoScreen() {
       descripcion_producto: '',
       monto_principal: 0,
       plazo_meses: 1,
+      frecuencia_cobro: 'mensual',
       garantia_id: '',
       observaciones: '',
     });
@@ -126,6 +138,8 @@ export default function NuevoCreditoProductoScreen() {
     const now = normalizarFecha(new Date());
     setFechaInicio(now);
     setFechaInicioDraft(now);
+    setPersonalizarCuotas(false);
+    setFilasManual([]);
     setLoadingClientes(true);
     clientesService.getAll()
       .then(cs => {
@@ -173,16 +187,32 @@ export default function NuevoCreditoProductoScreen() {
       .finally(() => setLoadingGarantias(false));
   }, [selectedCliente]);
 
-  const [monto, plazo] = watch(['monto_principal', 'plazo_meses']);
+  const [monto, plazo, frecuenciaCobro] = watch(['monto_principal', 'plazo_meses', 'frecuencia_cobro']);
+
+  const freq = (frecuenciaCobro as FrecuenciaCobro) ?? 'mensual';
 
   const preview = useMemo(() => {
     const m = Number(monto);
     const p = Number(plazo);
     if (!m || m <= 0 || !p || p <= 0) return null;
-    return calcularAmortizacionFrancesa(m, 0, p, fechaInicio);
-  }, [monto, plazo, fechaInicio]);
+    if (personalizarCuotas && filasManual.length === p) {
+      return cronogramaManualToResumen(filasManual, m, fechaInicio, freq);
+    }
+    return calcularAmortizacionFrancesa(m, 0, p, fechaInicio, freq);
+  }, [monto, plazo, fechaInicio, freq, personalizarCuotas, filasManual]);
+
+  const puedeGuardar = cronogramaManualValido(
+    personalizarCuotas,
+    Number(monto),
+    filasManual,
+    Number(plazo),
+  );
 
   const onSubmit = async (values: FormData) => {
+    if (!cronogramaManualValido(personalizarCuotas, values.monto_principal, filasManual, values.plazo_meses)) {
+      Alert.alert('Cuotas', 'Ajusta los montos hasta que la suma coincida con el monto total.');
+      return;
+    }
     setSaving(true);
     try {
       await prestamosService.createCreditoProducto(
@@ -191,6 +221,9 @@ export default function NuevoCreditoProductoScreen() {
           descripcion_producto: values.descripcion_producto,
           monto_principal: values.monto_principal,
           plazo_meses: values.plazo_meses,
+          frecuencia_cobro: values.frecuencia_cobro,
+          origen_cronograma: personalizarCuotas ? 'manual' : 'calculado',
+          cronograma_manual: personalizarCuotas ? filasToCronogramaJson(filasManual) : null,
           garantia_id: values.garantia_id || undefined,
           observaciones: values.observaciones,
         },
@@ -324,6 +357,28 @@ export default function NuevoCreditoProductoScreen() {
               />
             </View>
 
+            <Controller
+              control={control}
+              name="frecuencia_cobro"
+              render={({ field }) => (
+                <Select
+                  label="Frecuencia de cobro"
+                  options={FRECUENCIA_COBRO_OPTIONS}
+                  value={field.value}
+                  onSelect={field.onChange}
+                />
+              )}
+            />
+
+            <CronogramaManualEditor
+              enabled={personalizarCuotas}
+              onEnabledChange={setPersonalizarCuotas}
+              principal={Number(monto) || 0}
+              nCuotas={Number(plazo) || 0}
+              filas={filasManual}
+              onFilasChange={setFilasManual}
+            />
+
             {/* Fecha de inicio */}
             <View style={styles.fechaContainer}>
               <Text style={styles.fieldLabel}>Fecha primera cuota</Text>
@@ -348,7 +403,7 @@ export default function NuevoCreditoProductoScreen() {
                 <View style={styles.previewDivider} />
                 <View style={styles.previewStat}>
                   <Text style={styles.previewStatVal}>{formatCurrency(cuotaMonto)}</Text>
-                  <Text style={styles.previewStatLbl}>Valor por cuota</Text>
+                  <Text style={styles.previewStatLbl}>{personalizarCuotas ? 'Cuotas variables' : 'Valor por cuota'}</Text>
                 </View>
                 <View style={styles.previewDivider} />
                 <View style={styles.previewStat}>
@@ -371,7 +426,7 @@ export default function NuevoCreditoProductoScreen() {
                 ))}
                 {preview.cuotas.length > 6 && (
                   <Text style={styles.cuotasMore}>
-                    + {preview.cuotas.length - 6} cuotas más de {formatCurrency(cuotaMonto)} c/u
+                    + {preview.cuotas.length - 6} cuotas más
                   </Text>
                 )}
               </View>
@@ -429,6 +484,7 @@ export default function NuevoCreditoProductoScreen() {
             title={saving ? 'Registrando...' : 'Registrar crédito de producto'}
             onPress={handleSubmit(onSubmit)}
             loading={saving}
+            disabled={!puedeGuardar}
             variant="primary"
             size="lg"
           />

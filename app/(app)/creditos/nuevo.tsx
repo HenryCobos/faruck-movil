@@ -19,6 +19,18 @@ import { Button } from '@/components/ui/Button';
 import { Select, SelectOption } from '@/components/ui/Select';
 import { Colors } from '@/constants/colors';
 import { calcularAmortizacion, formatCurrency } from '@/utils/amortizacion';
+import {
+  FRECUENCIA_COBRO_OPTIONS,
+  periodoSubtitulo,
+  type FrecuenciaCobro,
+} from '@/utils/frecuenciaCobro';
+import {
+  cronogramaManualToResumen,
+  filasToCronogramaJson,
+  type CuotaManualFila,
+} from '@/utils/cronogramaManual';
+import { CronogramaManualEditor, cronogramaManualValido } from '@/components/creditos/CronogramaManualEditor';
+import { MAX_CONTRATOS_ADJUNTOS } from '@/utils/contratosAdjuntos';
 import { exportarCronogramaPdf } from '@/utils/cronogramaPdf';
 
 type DocAsset = { uri: string; name: string; mimeType: string };
@@ -28,7 +40,8 @@ const schema = z.object({
   garantia_id: z.string().min(1, 'Selecciona la garantía'),
   monto_principal: z.coerce.number().min(100, 'Monto mínimo $100'),
   tasa_mensual: z.coerce.number().min(0, 'La tasa no puede ser negativa').max(30, 'Tasa máxima 30%'),
-  plazo_meses: z.coerce.number().min(1).max(120),
+  plazo_meses: z.coerce.number().min(1).max(520),
+  frecuencia_cobro: z.enum(['mensual', 'quincenal', 'semanal']).default('mensual'),
   tipo_amortizacion: z.enum(['francesa', 'alemana', 'solo_interes', 'anticipado', 'solo_interes_adelantado']),
   comision_apertura: z.coerce.number().min(0).optional(),
   observaciones: z.string().optional(),
@@ -44,13 +57,23 @@ const AMORT_OPTIONS: SelectOption[] = [
   { label: 'Interés anticipado + capital al final', value: 'anticipado', icon: '⚡' },
 ];
 
-const AMORT_HINT: Record<string, string> = {
-  francesa:                'Cuota mensual fija que mezcla capital e interés (más interés al inicio).',
-  alemana:                 'Capital fijo mensual; las cuotas van bajando conforme baja el saldo.',
-  solo_interes:            'Cada mes se paga solo el interés. El capital completo se cancela en la última cuota.',
-  solo_interes_adelantado: 'La primera cuota de interés vence el mismo día del desembolso (cobro adelantado). Las siguientes cuotas de interés se pagan mensualmente y el capital íntegro al final del plazo.',
-  anticipado:              'El interés total del período vence el mismo día del desembolso (al entregar el crédito). El capital íntegro vence al final del plazo.',
-};
+function amortHint(tipo: string, freq: FrecuenciaCobro): string {
+  const cada = periodoSubtitulo(freq);
+  switch (tipo) {
+    case 'francesa':
+      return `Cuota fija ${cada} que mezcla capital e interés (más interés al inicio).`;
+    case 'alemana':
+      return `Capital fijo ${cada}; las cuotas van bajando conforme baja el saldo.`;
+    case 'solo_interes':
+      return `Cada periodo se paga solo el interés (${cada}). El capital completo se cancela en la última cuota.`;
+    case 'solo_interes_adelantado':
+      return `La primera cuota de interés vence el mismo día del desembolso. Las siguientes cuotas de interés se pagan ${cada} y el capital íntegro al final del plazo.`;
+    case 'anticipado':
+      return 'El interés total del período vence el mismo día del desembolso (al entregar el crédito). El capital íntegro vence al final del plazo.';
+    default:
+      return '';
+  }
+}
 
 export default function NuevoPrestamoScreen() {
   const insets = useSafeAreaInsets();
@@ -63,8 +86,10 @@ export default function NuevoPrestamoScreen() {
   const [garantias, setGarantias] = useState<SelectOption[]>([]);
   const [loadingGarantias, setLoadingGarantias] = useState(false);
   const [preview, setPreview] = useState<any>(null);
-  const [docAsset, setDocAsset] = useState<DocAsset | null>(null);
+  const [docAssets, setDocAssets] = useState<DocAsset[]>([]);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [personalizarCuotas, setPersonalizarCuotas] = useState(false);
+  const [filasManual, setFilasManual] = useState<CuotaManualFila[]>([]);
   // Fecha mínima aceptable — rechaza el epoch (1970) y fechas inválidas que
   // el picker iOS suele emitir como "onChange fantasma" al inicializarse.
   const FECHA_MIN = useMemo(() => new Date(2020, 0, 1), []);
@@ -183,6 +208,7 @@ export default function NuevoPrestamoScreen() {
     monto_principal: 0,
     tasa_mensual: 3,
     plazo_meses: 12,
+    frecuencia_cobro: 'mensual' as const,
     tipo_amortizacion: 'francesa' as const,
     comision_apertura: 0,
     observaciones: '',
@@ -219,7 +245,7 @@ export default function NuevoPrestamoScreen() {
 
     // Flujo normal: reset completo del formulario al entrar a la pantalla.
     reset(getDefaultValues());
-    setDocAsset(null);
+    setDocAssets([]);
     setPreview(null);
     setGarantias([]);
     const now = normalizarFecha(new Date());
@@ -257,8 +283,18 @@ export default function NuevoPrestamoScreen() {
   }, [reset, getDefaultValues, params.clienteId, normalizarFecha, getValues]));
 
   const watchedFields = watch(['monto_principal', 'tasa_mensual', 'plazo_meses', 'tipo_amortizacion']);
+  const frecuenciaCobro = watch('frecuencia_cobro') as FrecuenciaCobro;
   const tipoSeleccionado = watchedFields[3] as string;
   const esAnticipado = tipoSeleccionado === 'anticipado';
+  const tasaNum = Number(watchedFields[1]);
+  const esSinInteres = !esAnticipado && Number.isFinite(tasaNum) && tasaNum === 0;
+
+  useEffect(() => {
+    if (!esSinInteres && personalizarCuotas) {
+      setPersonalizarCuotas(false);
+      setFilasManual([]);
+    }
+  }, [esSinInteres, personalizarCuotas]);
 
   // Cuando cambia el cliente, cargamos sus garantías disponibles desde la API
   const selectedCliente = watch('cliente_id');
@@ -291,15 +327,32 @@ export default function NuevoPrestamoScreen() {
         const plazoDias = calcularDiasAnticipado(fechaDesembolso, fechaVencCapital);
         if (plazoDias <= 0) { setPreview(null); return; }
         const plazoMesesEfectivo = Math.ceil(plazoDias / 30) || 1;
-        const res = calcularAmortizacion(tipo, Number(monto), Number(tasa) / 100, plazoMesesEfectivo, fechaDesembolso, plazoDias);
+        const res = calcularAmortizacion(tipo, Number(monto), Number(tasa) / 100, plazoMesesEfectivo, fechaDesembolso, plazoDias, frecuenciaCobro);
         setPreview(res);
       } else {
         if (!plazo) { setPreview(null); return; }
-        const res = calcularAmortizacion(tipo, Number(monto), Number(tasa) / 100, Number(plazo), fechaDesembolso);
+        if (
+          personalizarCuotas
+          && tasaNum === 0
+          && filasManual.length === Number(plazo)
+        ) {
+          setPreview(cronogramaManualToResumen(
+            filasManual,
+            Number(monto),
+            fechaDesembolso,
+            frecuenciaCobro,
+          ));
+          return;
+        }
+        const res = calcularAmortizacion(tipo, Number(monto), Number(tasa) / 100, Number(plazo), fechaDesembolso, undefined, frecuenciaCobro);
         setPreview(res);
       }
     } catch { setPreview(null); }
-  }, [watchedFields.join(','), fechaDesembolso, fechaVencCapital, calcularDiasAnticipado]);
+  }, [watchedFields.join(','), fechaDesembolso, fechaVencCapital, calcularDiasAnticipado, frecuenciaCobro, personalizarCuotas, filasManual, tasaNum]);
+
+  const plazoCuotas = Number(watchedFields[2]) || 0;
+  const montoCuotas = Number(watchedFields[0]) || 0;
+  const puedeGuardarManual = cronogramaManualValido(personalizarCuotas, montoCuotas, filasManual, plazoCuotas);
 
   const handleExportarPdf = async () => {
     if (!preview) return;
@@ -324,22 +377,36 @@ export default function NuevoPrestamoScreen() {
   };
 
   const pickDocumento = async () => {
+    const restantes = MAX_CONTRATOS_ADJUNTOS - docAssets.length;
+    if (restantes <= 0) {
+      Alert.alert('Límite', `Máximo ${MAX_CONTRATOS_ADJUNTOS} documentos.`);
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       type: ['application/pdf', 'image/jpeg', 'image/png', 'image/*'],
       copyToCacheDirectory: true,
+      multiple: true,
     });
     if (!result.canceled && result.assets.length > 0) {
-      const asset = result.assets[0];
-      setDocAsset({
+      const nuevos = result.assets.slice(0, restantes).map(asset => ({
         uri: asset.uri,
         name: asset.name,
         mimeType: asset.mimeType ?? 'application/pdf',
-      });
+      }));
+      setDocAssets(prev => [...prev, ...nuevos].slice(0, MAX_CONTRATOS_ADJUNTOS));
     }
   };
 
   const onSubmit = async (data: FormData) => {
     if (!profile?.id) return;
+    if (
+      personalizarCuotas
+      && Number(data.tasa_mensual) === 0
+      && !cronogramaManualValido(true, Number(data.monto_principal), filasManual, Number(data.plazo_meses))
+    ) {
+      Alert.alert('Cuotas', 'Ajusta los montos hasta que la suma coincida con el monto a prestar.');
+      return;
+    }
     setSaving(true);
     try {
       const esAnticipadoSubmit = data.tipo_amortizacion === 'anticipado';
@@ -357,17 +424,22 @@ export default function NuevoPrestamoScreen() {
         plazo_meses: plazoMesesCalculado,
         plazo_dias: plazoDias,
         comision_apertura: Number(data.comision_apertura ?? 0),
+        frecuencia_cobro: data.frecuencia_cobro,
+        origen_cronograma: personalizarCuotas && Number(data.tasa_mensual) === 0 ? 'manual' : 'calculado',
+        cronograma_manual: personalizarCuotas && Number(data.tasa_mensual) === 0
+          ? filasToCronogramaJson(filasManual)
+          : null,
       }, profile.id);
 
-      // La subida del contrato es opcional: si falla, el préstamo igual se crea
-      if (docAsset) {
+      if (docAssets.length > 0) {
         try {
-          const url = await prestamosService.uploadContrato(docAsset.uri, p.id, docAsset.mimeType);
-          await prestamosService.actualizarContrato(p.id, url);
+          for (const doc of docAssets) {
+            await prestamosService.agregarContratoAdjunto(p.id, doc.uri, doc.mimeType, doc.name);
+          }
         } catch {
           Alert.alert(
             'Préstamo creado',
-            'El préstamo fue registrado correctamente, pero el contrato no pudo subirse. Podrás adjuntarlo desde el detalle del préstamo.',
+            'El préstamo fue registrado, pero uno o más documentos no pudieron subirse. Podrás adjuntarlos desde el detalle.',
             [{ text: 'Entendido' }],
           );
         }
@@ -451,19 +523,39 @@ export default function NuevoPrestamoScreen() {
               {!esAnticipado && (
                 <View style={styles.flex}>
                   <Controller control={control} name="plazo_meses" render={({ field: { onChange, value } }) => (
-                    <Input label="Plazo (meses)" placeholder="12" value={String(value || '')} onChangeText={onChange}
+                    <Input label="Número de cuotas" placeholder="12" value={String(value || '')} onChangeText={onChange}
                       keyboardType="numeric" error={errors.plazo_meses?.message}
                       leftIcon={<Text style={styles.fi}>📅</Text>} />
                   )} />
                 </View>
               )}
             </View>
+            {!esAnticipado && (
+              <Controller control={control} name="frecuencia_cobro" render={({ field: { onChange, value } }) => (
+                <Select
+                  label="Frecuencia de cobro"
+                  options={FRECUENCIA_COBRO_OPTIONS}
+                  value={value}
+                  onSelect={onChange}
+                />
+              )} />
+            )}
+            {esSinInteres && (
+              <CronogramaManualEditor
+                enabled={personalizarCuotas}
+                onEnabledChange={setPersonalizarCuotas}
+                principal={montoCuotas}
+                nCuotas={plazoCuotas}
+                filas={filasManual}
+                onFilasChange={setFilasManual}
+              />
+            )}
             <Controller control={control} name="tipo_amortizacion" render={({ field: { onChange, value } }) => (
               <Select label="Tipo de Amortización" options={AMORT_OPTIONS} value={value} onSelect={onChange} />
             )} />
-            {tipoSeleccionado && AMORT_HINT[tipoSeleccionado] ? (
+            {tipoSeleccionado && amortHint(tipoSeleccionado, esAnticipado ? 'mensual' : frecuenciaCobro) ? (
               <View style={styles.amortHint}>
-                <Text style={styles.amortHintText}>ℹ️  {AMORT_HINT[tipoSeleccionado]}</Text>
+                <Text style={styles.amortHintText}>ℹ️  {amortHint(tipoSeleccionado, esAnticipado ? 'mensual' : frecuenciaCobro)}</Text>
               </View>
             ) : null}
 
@@ -687,29 +779,35 @@ export default function NuevoPrestamoScreen() {
           {/* Contrato */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>📄 Contrato del Préstamo</Text>
-            {docAsset ? (
-              <View style={styles.docSelected}>
+            {docAssets.map((doc, idx) => (
+              <View key={`${doc.uri}-${idx}`} style={styles.docSelected}>
                 <Text style={styles.docSelectedIcon}>📄</Text>
-                <Text style={styles.docSelectedName} numberOfLines={2}>{docAsset.name}</Text>
-                <TouchableOpacity style={styles.docRemoveBtn} onPress={() => setDocAsset(null)}>
+                <Text style={styles.docSelectedName} numberOfLines={2}>{doc.name}</Text>
+                <TouchableOpacity style={styles.docRemoveBtn} onPress={() => setDocAssets(prev => prev.filter((_, i) => i !== idx))}>
                   <Text style={styles.docRemoveText}>✕</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
+            ))}
+            {docAssets.length < MAX_CONTRATOS_ADJUNTOS && (
               <TouchableOpacity style={styles.docPickerBtn} onPress={pickDocumento} activeOpacity={0.7}>
                 <Text style={styles.docPickerIcon}>📎</Text>
                 <View>
-                  <Text style={styles.docPickerLabel}>Adjuntar Contrato</Text>
-                  <Text style={styles.docPickerHint}>PDF o imagen — opcional</Text>
+                  <Text style={styles.docPickerLabel}>
+                    {docAssets.length === 0 ? 'Adjuntar contrato' : 'Agregar otro documento'}
+                  </Text>
+                  <Text style={styles.docPickerHint}>
+                    PDF o imagen — hasta {MAX_CONTRATOS_ADJUNTOS} ({docAssets.length}/{MAX_CONTRATOS_ADJUNTOS})
+                  </Text>
                 </View>
               </TouchableOpacity>
             )}
           </View>
 
           <Button
-            title={saving ? (docAsset ? 'Subiendo contrato...' : 'Creando...') : 'Crear Préstamo'}
+            title={saving ? (docAssets.length ? 'Subiendo documentos...' : 'Creando...') : 'Crear Préstamo'}
             onPress={handleSubmit(onSubmit as any)}
             loading={saving}
+            disabled={!puedeGuardarManual}
             size="lg"
           />
         </ScrollView>

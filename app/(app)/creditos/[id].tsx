@@ -23,7 +23,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Colors } from '@/constants/colors';
 import { Cuota, CuotaEstado, AbonoCapital } from '@/types';
-import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota, calcularAsignacionPago } from '@/utils/amortizacion';
+import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota, calcularAsignacionPago, textoPlazoCuotas, labelFrecuencia } from '@/utils/amortizacion';
+import type { FrecuenciaCobro } from '@/types';
+import {
+  parseContratosAdjuntos,
+  displayNombre,
+  MAX_CONTRATOS_ADJUNTOS,
+} from '@/utils/contratosAdjuntos';
 
 const ESTADO_VARIANT: Record<string, any> = {
   solicitado: 'warning', aprobado: 'info', activo: 'success',
@@ -244,22 +250,23 @@ export default function CreditoDetailScreen() {
   const fmtFechaLocal = (d: Date) =>
     d.toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' });
 
-  const handleVerContrato = async () => {
-    if (!prestamo?.contrato_url) return;
-    const supported = await Linking.canOpenURL(prestamo.contrato_url);
+  const contratosDocs = prestamo ? parseContratosAdjuntos(prestamo) : [];
+  const puedeGestionarContratos = profile?.rol === 'admin' || profile?.rol === 'oficial';
+
+  const handleVerContrato = async (url: string) => {
+    const supported = await Linking.canOpenURL(url);
     if (supported) {
-      await Linking.openURL(prestamo.contrato_url);
+      await Linking.openURL(url);
     } else {
       Alert.alert('Error', 'No se puede abrir el documento en este dispositivo');
     }
   };
 
-  const handleCompartirContrato = async () => {
-    if (!prestamo?.contrato_url) return;
+  const handleCompartirContrato = async (url: string) => {
     try {
-      const rawName = prestamo.contrato_url.split('/').pop()?.split('?')[0] ?? 'contrato';
+      const rawName = url.split('/').pop()?.split('?')[0] ?? 'contrato';
       const localUri = `${FileSystem.cacheDirectory}${rawName}`;
-      await FileSystem.downloadAsync(prestamo.contrato_url, localUri);
+      await FileSystem.downloadAsync(url, localUri);
       await Sharing.shareAsync(localUri);
     } catch {
       Alert.alert('Error', 'No se pudo compartir el documento');
@@ -267,26 +274,58 @@ export default function CreditoDetailScreen() {
   };
 
   const handleAdjuntarContrato = async () => {
+    if (!id) return;
+    if (contratosDocs.length >= MAX_CONTRATOS_ADJUNTOS) {
+      Alert.alert('Límite alcanzado', `Solo puedes adjuntar hasta ${MAX_CONTRATOS_ADJUNTOS} documentos.`);
+      return;
+    }
     const result = await DocumentPicker.getDocumentAsync({
       type: ['application/pdf', 'image/jpeg', 'image/png', 'image/*'],
       copyToCacheDirectory: true,
+      multiple: false,
     });
     if (result.canceled || !result.assets.length) return;
     const asset = result.assets[0];
     setUploadingContrato(true);
     try {
-      const url = await prestamosService.uploadContrato(
+      await prestamosService.agregarContratoAdjunto(
+        id,
         asset.uri,
-        id!,
         asset.mimeType ?? 'application/pdf',
+        asset.name,
       );
-      await prestamosService.actualizarContrato(id!, url);
       await load();
-    } catch {
-      Alert.alert('Error', 'No se pudo subir el contrato. Intenta de nuevo.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo subir el documento. Intenta de nuevo.');
     } finally {
       setUploadingContrato(false);
     }
+  };
+
+  const handleEliminarContrato = (url: string, nombre: string) => {
+    if (!id) return;
+    Alert.alert(
+      'Eliminar documento',
+      `¿Quitar "${nombre}" de este préstamo?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            setUploadingContrato(true);
+            try {
+              await prestamosService.eliminarContratoAdjunto(id, url);
+              await load();
+            } catch (e: any) {
+              Alert.alert('Error', e.message ?? 'No se pudo eliminar el documento');
+            } finally {
+              setUploadingContrato(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleCancelar = () => {
@@ -579,12 +618,21 @@ export default function CreditoDetailScreen() {
           <View style={styles.heroPills}>
             <View style={styles.heroPill}>
               <Text style={styles.heroPillText}>
-                {esProducto ? '🏷️ Venta a crédito' : `📅 ${prestamo.tipo_amortizacion === 'anticipado' && prestamo.plazo_dias ? `${prestamo.plazo_dias} días` : `${prestamo.plazo_meses} meses`}`}
+                {esProducto
+                  ? '🏷️ Venta a crédito'
+                  : `📅 ${prestamo.tipo_amortizacion === 'anticipado' && prestamo.plazo_dias
+                    ? `${prestamo.plazo_dias} días`
+                    : textoPlazoCuotas(prestamo.plazo_meses, prestamo.frecuencia_cobro)}`}
               </Text>
             </View>
+            {prestamo.origen_cronograma === 'manual' && (
+              <View style={styles.heroPill}>
+                <Text style={styles.heroPillText}>✏️ Cuotas personalizadas</Text>
+              </View>
+            )}
             {esProducto ? (
               <>
-                <View style={styles.heroPill}><Text style={styles.heroPillText}>📦 {prestamo.plazo_meses} cuota{prestamo.plazo_meses !== 1 ? 's' : ''}</Text></View>
+                <View style={styles.heroPill}><Text style={styles.heroPillText}>📦 {textoPlazoCuotas(prestamo.plazo_meses, prestamo.frecuencia_cobro)}</Text></View>
                 <View style={styles.heroPill}><Text style={styles.heroPillText}>✅ Sin interés</Text></View>
               </>
             ) : (
@@ -758,7 +806,7 @@ export default function CreditoDetailScreen() {
             <>
               <InfoRow
                 label="Cuotas"
-                value={`${prestamo.plazo_meses} cuota${prestamo.plazo_meses !== 1 ? 's' : ''} iguales`}
+                value={`${prestamo.plazo_meses} cuota${prestamo.plazo_meses !== 1 ? 's' : ''} iguales · ${labelFrecuencia((prestamo.frecuencia_cobro ?? 'mensual') as FrecuenciaCobro)}`}
               />
               <InfoRow label="Intereses" value="Sin interés" color={Colors.success} />
             </>
@@ -770,9 +818,13 @@ export default function CreditoDetailScreen() {
                 value={
                   prestamo.tipo_amortizacion === 'anticipado' && prestamo.plazo_dias
                     ? `${prestamo.plazo_dias} días (≈ ${prestamo.plazo_meses} mes${prestamo.plazo_meses !== 1 ? 'es' : ''})`
-                    : `${prestamo.plazo_meses} meses`
+                    : textoPlazoCuotas(prestamo.plazo_meses, prestamo.frecuencia_cobro)
                 }
               />
+              {prestamo.frecuencia_cobro && prestamo.frecuencia_cobro !== 'mensual'
+                && prestamo.tipo_amortizacion !== 'anticipado' && (
+                <InfoRow label="Frecuencia de cobro" value={labelFrecuencia(prestamo.frecuencia_cobro)} />
+              )}
               <InfoRow label="Amortización" value={AMORT_LABEL[prestamo.tipo_amortizacion] ?? prestamo.tipo_amortizacion} />
               {prestamo.comision_apertura > 0 && <InfoRow label="Comisión Apertura" value={formatCurrency(prestamo.comision_apertura)} />}
               {prestamo.tipo_amortizacion === 'anticipado' && prestamo.fecha_desembolso && (() => {
@@ -809,34 +861,58 @@ export default function CreditoDetailScreen() {
         {/* Contrato */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{esProducto ? '📄 Documento del acuerdo' : '📄 Contrato del Préstamo'}</Text>
-          {prestamo.contrato_url ? (
+          {contratosDocs.length > 0 ? (
             <>
-              <View style={styles.contratoFile}>
-                <Text style={styles.contratoFileIcon}>📄</Text>
-                <Text style={styles.contratoFileName} numberOfLines={2}>
-                  {decodeURIComponent(prestamo.contrato_url.split('/').pop()?.split('?')[0] ?? 'Contrato').replace(/^\d+\./, '')}
-                </Text>
-              </View>
-              <View style={styles.contratoActions}>
-                <TouchableOpacity style={styles.contratoBtn} onPress={handleVerContrato} activeOpacity={0.75}>
-                  <Text style={styles.contratoBtnText}>👁  Ver / Abrir</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.contratoBtn, styles.contratoBtnShare]} onPress={handleCompartirContrato} activeOpacity={0.75}>
-                  <Text style={styles.contratoBtnText}>📤  Compartir</Text>
-                </TouchableOpacity>
-              </View>
-              {(profile?.rol === 'admin' || profile?.rol === 'oficial') && (
-                <TouchableOpacity style={styles.contratoReplaceBtn} onPress={handleAdjuntarContrato} disabled={uploadingContrato} activeOpacity={0.7}>
-                  <Text style={styles.contratoReplaceTxt}>{uploadingContrato ? 'Subiendo...' : '🔄 Reemplazar contrato'}</Text>
+              {contratosDocs.map((doc, idx) => {
+                const nombre = displayNombre(doc);
+                return (
+                  <View key={doc.url} style={[styles.contratoDocBlock, idx > 0 && { marginTop: 14 }]}>
+                    <View style={styles.contratoFile}>
+                      <Text style={styles.contratoFileIcon}>📄</Text>
+                      <Text style={styles.contratoFileName} numberOfLines={2}>{nombre}</Text>
+                    </View>
+                    <View style={styles.contratoActions}>
+                      <TouchableOpacity style={styles.contratoBtn} onPress={() => handleVerContrato(doc.url)} activeOpacity={0.75}>
+                        <Text style={styles.contratoBtnText}>👁  Ver / Abrir</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.contratoBtn, styles.contratoBtnShare]} onPress={() => handleCompartirContrato(doc.url)} activeOpacity={0.75}>
+                        <Text style={styles.contratoBtnText}>📤  Compartir</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {puedeGestionarContratos && (
+                      <TouchableOpacity
+                        style={styles.contratoDeleteBtn}
+                        onPress={() => handleEliminarContrato(doc.url, nombre)}
+                        disabled={uploadingContrato}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.contratoDeleteTxt}>Eliminar documento</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+              {puedeGestionarContratos && (
+                <TouchableOpacity
+                  style={[styles.adjuntarBtn, contratosDocs.length >= MAX_CONTRATOS_ADJUNTOS && styles.adjuntarBtnDisabled]}
+                  onPress={handleAdjuntarContrato}
+                  disabled={uploadingContrato || contratosDocs.length >= MAX_CONTRATOS_ADJUNTOS}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.adjuntarBtnText}>
+                    {uploadingContrato
+                      ? '⏳ Subiendo...'
+                      : `📎 Agregar documento (${contratosDocs.length}/${MAX_CONTRATOS_ADJUNTOS})`}
+                  </Text>
                 </TouchableOpacity>
               )}
             </>
           ) : (
             <View style={styles.contratoEmpty}>
               <Text style={styles.contratoEmptyIcon}>📋</Text>
-              <Text style={styles.contratoEmptyTitle}>Sin contrato adjunto</Text>
-              <Text style={styles.contratoEmptyDesc}>Aún no se ha subido el documento del contrato</Text>
-              {(profile?.rol === 'admin' || profile?.rol === 'oficial') && (
+              <Text style={styles.contratoEmptyTitle}>Sin documentos adjuntos</Text>
+              <Text style={styles.contratoEmptyDesc}>Puedes adjuntar hasta {MAX_CONTRATOS_ADJUNTOS} archivos (PDF o imagen)</Text>
+              {puedeGestionarContratos && (
                 <TouchableOpacity
                   style={styles.adjuntarBtn}
                   onPress={handleAdjuntarContrato}
@@ -844,7 +920,7 @@ export default function CreditoDetailScreen() {
                   activeOpacity={0.75}
                 >
                   <Text style={styles.adjuntarBtnText}>
-                    {uploadingContrato ? '⏳ Subiendo...' : '📎 Adjuntar Contrato'}
+                    {uploadingContrato ? '⏳ Subiendo...' : `📎 Adjuntar documento (0/${MAX_CONTRATOS_ADJUNTOS})`}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -1657,16 +1733,18 @@ const styles = StyleSheet.create({
   },
   contratoBtnShare: { backgroundColor: Colors.accent },
   contratoBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
-  contratoReplaceBtn: { marginTop: 8, alignItems: 'center', paddingVertical: 6 },
-  contratoReplaceTxt: { fontSize: 12, color: Colors.muted, textDecorationLine: 'underline' },
+  contratoDocBlock: { marginBottom: 4 },
+  contratoDeleteBtn: { marginTop: 8, alignItems: 'center', paddingVertical: 4 },
+  contratoDeleteTxt: { fontSize: 12, color: Colors.danger, fontWeight: '600' },
   contratoEmpty: { alignItems: 'center', gap: 6, paddingVertical: 12 },
   contratoEmptyIcon: { fontSize: 36, opacity: 0.4 },
   contratoEmptyTitle: { fontSize: 14, fontWeight: '700', color: Colors.muted },
   contratoEmptyDesc: { fontSize: 12, color: Colors.muted, textAlign: 'center', lineHeight: 18 },
   adjuntarBtn: {
-    marginTop: 8, backgroundColor: Colors.primary, borderRadius: 10,
+    marginTop: 12, backgroundColor: Colors.primary, borderRadius: 10,
     paddingHorizontal: 20, paddingVertical: 11,
   },
+  adjuntarBtnDisabled: { opacity: 0.45 },
   adjuntarBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
   // Fotos de garantía
   fotosContainer: { marginTop: 12, gap: 8 },

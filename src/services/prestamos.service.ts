@@ -1,7 +1,14 @@
 import { supabase, withTimeout } from '../lib/supabase';
 import { Prestamo, Cuota, AbonoCapital, ResultadoAbonoCapital, ResultadoAnulacionAbono } from '../types';
 import { auditoriaService } from './auditoria.service';
-import { parseFechaLocal, formatFechaISO } from '../utils/amortizacion';
+import { parseFechaLocal, formatFechaISO, fechaVencimientoCuota } from '../utils/amortizacion';
+import type { FrecuenciaCobro, OrigenCronograma, CuotaManualJson, ContratoAdjunto } from '../types';
+import {
+  MAX_CONTRATOS_ADJUNTOS,
+  parseContratosAdjuntos,
+  contratoUrlPrincipal,
+  storagePathFromPublicUrl,
+} from '../utils/contratosAdjuntos';
 import * as FileSystem from 'expo-file-system/legacy';
 
 export type RenovarPrestamoDTO = {
@@ -12,6 +19,7 @@ export type RenovarPrestamoDTO = {
   nuevoTipo: 'francesa' | 'alemana' | 'solo_interes' | 'anticipado' | 'solo_interes_adelantado';
   nuevaComision?: number;
   nuevoPlazosDias?: number;
+  frecuenciaCobro?: FrecuenciaCobro;
   observaciones?: string;
 };
 
@@ -25,6 +33,9 @@ export type CreatePrestamoDTO = {
   tipo_amortizacion: 'francesa' | 'alemana' | 'solo_interes' | 'anticipado' | 'solo_interes_adelantado';
   comision_apertura?: number;
   observaciones?: string;
+  frecuencia_cobro?: FrecuenciaCobro;
+  origen_cronograma?: OrigenCronograma;
+  cronograma_manual?: CuotaManualJson[] | null;
 };
 
 export type CreateCreditoProductoDTO = {
@@ -34,6 +45,9 @@ export type CreateCreditoProductoDTO = {
   plazo_meses: number;
   garantia_id?: string;
   observaciones?: string;
+  frecuencia_cobro?: FrecuenciaCobro;
+  origen_cronograma?: OrigenCronograma;
+  cronograma_manual?: CuotaManualJson[] | null;
 };
 
 export const prestamosService = {
@@ -75,7 +89,14 @@ export const prestamosService = {
   async create(dto: CreatePrestamoDTO, oficialId: string): Promise<Prestamo> {
     const { data, error } = await supabase
       .from('prestamos')
-      .insert({ ...dto, oficial_id: oficialId, comision_apertura: dto.comision_apertura ?? 0 })
+      .insert({
+        ...dto,
+        oficial_id: oficialId,
+        comision_apertura: dto.comision_apertura ?? 0,
+        frecuencia_cobro: dto.frecuencia_cobro ?? 'mensual',
+        origen_cronograma: dto.origen_cronograma ?? 'calculado',
+        cronograma_manual: dto.origen_cronograma === 'manual' ? dto.cronograma_manual ?? null : null,
+      })
       .select()
       .single();
     if (error) throw error;
@@ -118,19 +139,20 @@ export const prestamosService = {
     const fechaObj = parseFechaLocal(fechaDesembolso);
     const plazoRes = await supabase
       .from('prestamos')
-      .select('plazo_meses, plazo_dias, tipo_amortizacion, monto_principal')
+      .select('plazo_meses, plazo_dias, tipo_amortizacion, monto_principal, frecuencia_cobro')
       .eq('id', id)
       .single();
     if (plazoRes.error) throw plazoRes.error;
 
-    const { plazo_meses, plazo_dias, tipo_amortizacion, monto_principal } = plazoRes.data;
+    const { plazo_meses, plazo_dias, tipo_amortizacion, monto_principal, frecuencia_cobro } = plazoRes.data;
+    const freq: FrecuenciaCobro = (frecuencia_cobro as FrecuenciaCobro) ?? 'mensual';
 
-    // Para tipo anticipado con plazo_dias, la fecha de vencimiento usa días exactos
-    const fechaVencimiento = new Date(fechaObj);
+    let fechaVencimiento: Date;
     if (tipo_amortizacion === 'anticipado' && plazo_dias) {
+      fechaVencimiento = new Date(fechaObj);
       fechaVencimiento.setDate(fechaVencimiento.getDate() + plazo_dias);
     } else {
-      fechaVencimiento.setMonth(fechaVencimiento.getMonth() + plazo_meses);
+      fechaVencimiento = fechaVencimientoCuota(fechaObj, plazo_meses, freq);
     }
 
     const { error } = await supabase
@@ -158,11 +180,103 @@ export const prestamosService = {
   },
 
   async actualizarContrato(id: string, contratoUrl: string | null): Promise<void> {
+    const adjuntos: ContratoAdjunto[] = contratoUrl
+      ? [{ url: contratoUrl, nombre: 'Contrato', created_at: new Date().toISOString() }]
+      : [];
     const { error } = await supabase
       .from('prestamos')
-      .update({ contrato_url: contratoUrl })
+      .update({
+        contrato_url: contratoUrl,
+        contratos_adjuntos: adjuntos,
+      })
       .eq('id', id);
     if (error) throw error;
+  },
+
+  async agregarContratoAdjunto(
+    prestamoId: string,
+    uri: string,
+    mimeType: string,
+    nombre?: string,
+  ): Promise<ContratoAdjunto[]> {
+    const { data: row, error: fetchErr } = await supabase
+      .from('prestamos')
+      .select('contratos_adjuntos, contrato_url')
+      .eq('id', prestamoId)
+      .single();
+    if (fetchErr) throw fetchErr;
+
+    const actuales = parseContratosAdjuntos(row);
+    if (actuales.length >= MAX_CONTRATOS_ADJUNTOS) {
+      throw new Error(`Máximo ${MAX_CONTRATOS_ADJUNTOS} documentos por préstamo`);
+    }
+
+    const url = await this.uploadContrato(uri, prestamoId, mimeType);
+    const nuevo: ContratoAdjunto = {
+      url,
+      nombre: nombre?.trim() || 'Documento',
+      mime_type: mimeType,
+      created_at: new Date().toISOString(),
+    };
+    const actualizados = [...actuales, nuevo];
+
+    const { error } = await supabase
+      .from('prestamos')
+      .update({
+        contratos_adjuntos: actualizados,
+        contrato_url: contratoUrlPrincipal(actualizados),
+      })
+      .eq('id', prestamoId);
+    if (error) throw error;
+
+    auditoriaService.registrar({
+      tabla: 'prestamos',
+      accion: 'actualizar',
+      registroId: prestamoId,
+      descripcion: `Documento adjunto agregado (${actualizados.length}/${MAX_CONTRATOS_ADJUNTOS})`,
+      datos: { url, nombre: nuevo.nombre },
+    }).catch(() => {});
+
+    return actualizados;
+  },
+
+  async eliminarContratoAdjunto(prestamoId: string, url: string): Promise<ContratoAdjunto[]> {
+    const { data: row, error: fetchErr } = await supabase
+      .from('prestamos')
+      .select('contratos_adjuntos, contrato_url')
+      .eq('id', prestamoId)
+      .single();
+    if (fetchErr) throw fetchErr;
+
+    const actuales = parseContratosAdjuntos(row);
+    const actualizados = actuales.filter(a => a.url !== url);
+    if (actualizados.length === actuales.length) {
+      throw new Error('Documento no encontrado en este préstamo');
+    }
+
+    const path = storagePathFromPublicUrl(url);
+    if (path) {
+      await supabase.storage.from('pignora-fotos').remove([path]);
+    }
+
+    const { error } = await supabase
+      .from('prestamos')
+      .update({
+        contratos_adjuntos: actualizados,
+        contrato_url: contratoUrlPrincipal(actualizados),
+      })
+      .eq('id', prestamoId);
+    if (error) throw error;
+
+    auditoriaService.registrar({
+      tabla: 'prestamos',
+      accion: 'actualizar',
+      registroId: prestamoId,
+      descripcion: 'Documento adjunto eliminado',
+      datos: { url },
+    }).catch(() => {});
+
+    return actualizados;
   },
 
   async uploadContrato(uri: string, prestamoId: string, mimeType: string): Promise<string> {
@@ -260,6 +374,7 @@ export const prestamosService = {
       p_nueva_comision:       dto.nuevaComision ?? 0,
       p_observaciones:        dto.observaciones ?? null,
       p_nuevo_plazo_dias:     dto.nuevoPlazosDias ?? null,
+      p_frecuencia_cobro:     dto.frecuenciaCobro ?? null,
     });
     if (error) throw error;
 
@@ -289,6 +404,9 @@ export const prestamosService = {
       descripcion_producto: dto.descripcion_producto,
       comision_apertura: 0,
       observaciones: dto.observaciones ?? null,
+      frecuencia_cobro: dto.frecuencia_cobro ?? 'mensual',
+      origen_cronograma: dto.origen_cronograma ?? 'calculado',
+      cronograma_manual: dto.origen_cronograma === 'manual' ? dto.cronograma_manual ?? null : null,
     };
     if (dto.garantia_id) {
       payload.garantia_id = dto.garantia_id;

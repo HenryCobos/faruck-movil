@@ -1,4 +1,11 @@
-﻿export interface CuotaCalculada {
+﻿import {
+  type FrecuenciaCobro,
+  tasaPorPeriodo,
+  fechaVencimientoCuota,
+  fechaVencimientoCuotaAdelantada,
+} from './frecuenciaCobro';
+
+export interface CuotaCalculada {
   numero: number;
   fechaVencimiento: Date;
   capital: number;
@@ -20,13 +27,14 @@ export function calcularAmortizacionFrancesa(
   principal: number,
   tasaMensual: number,
   plazoMeses: number,
-  fechaInicio: Date = new Date()
+  fechaInicio: Date = new Date(),
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   if (plazoMeses <= 0) {
     return { cuotas: [], totalCapital: principal, totalIntereses: 0, totalPagar: principal, primeraCuota: 0, ultimaCuota: 0 };
   }
 
-  const r = tasaMensual;
+  const r = tasaPorPeriodo(tasaMensual, frecuenciaCobro);
   // When r=0 distribute capital evenly (no interest)
   const cuotaFija = r === 0
     ? principal / plazoMeses
@@ -34,6 +42,7 @@ export function calcularAmortizacionFrancesa(
   const cuotas: CuotaCalculada[] = [];
   let saldo = principal;
   let totalIntereses = 0;
+  const base = inicioDiaLocal(fechaInicio);
 
   for (let i = 1; i <= plazoMeses; i++) {
     const interes = round(saldo * r);
@@ -41,8 +50,7 @@ export function calcularAmortizacionFrancesa(
     if (i === plazoMeses) capital = round(saldo);
     saldo = round(saldo - capital);
 
-    const fechaV = new Date(fechaInicio);
-    fechaV.setMonth(fechaV.getMonth() + i);
+    const fechaV = fechaVencimientoCuota(base, i, frecuenciaCobro);
     totalIntereses += interes;
 
     cuotas.push({
@@ -69,24 +77,26 @@ export function calcularAmortizacionAlemana(
   principal: number,
   tasaMensual: number,
   plazoMeses: number,
-  fechaInicio: Date = new Date()
+  fechaInicio: Date = new Date(),
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   if (plazoMeses <= 0) {
     return { cuotas: [], totalCapital: principal, totalIntereses: 0, totalPagar: principal, primeraCuota: 0, ultimaCuota: 0 };
   }
 
+  const r = tasaPorPeriodo(tasaMensual, frecuenciaCobro);
   const capitalFijo = round(principal / plazoMeses);
   const cuotas: CuotaCalculada[] = [];
   let saldo = principal;
   let totalIntereses = 0;
+  const base = inicioDiaLocal(fechaInicio);
 
   for (let i = 1; i <= plazoMeses; i++) {
-    const interes = round(saldo * tasaMensual);
+    const interes = round(saldo * r);
     const capital = i === plazoMeses ? round(saldo) : capitalFijo;
     saldo = round(saldo - capital);
 
-    const fechaV = new Date(fechaInicio);
-    fechaV.setMonth(fechaV.getMonth() + i);
+    const fechaV = fechaVencimientoCuota(base, i, frecuenciaCobro);
     totalIntereses += interes;
 
     cuotas.push({
@@ -118,22 +128,24 @@ export function calcularAmortizacionSoloInteres(
   principal: number,
   tasaMensual: number,
   plazoMeses: number,
-  fechaInicio: Date = new Date()
+  fechaInicio: Date = new Date(),
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   if (plazoMeses <= 0) {
     return { cuotas: [], totalCapital: principal, totalIntereses: 0, totalPagar: principal, primeraCuota: 0, ultimaCuota: 0 };
   }
 
   const cuotas: CuotaCalculada[] = [];
-  const interesMensual = round(principal * tasaMensual);
+  const r = tasaPorPeriodo(tasaMensual, frecuenciaCobro);
+  const interesMensual = round(principal * r);
   let totalIntereses = 0;
+  const base = inicioDiaLocal(fechaInicio);
 
   for (let i = 1; i <= plazoMeses; i++) {
     const esUltima = i === plazoMeses;
     const capital  = esUltima ? principal : 0;
     const interes  = interesMensual;
-    const fechaV   = new Date(fechaInicio);
-    fechaV.setMonth(fechaV.getMonth() + i);
+    const fechaV   = fechaVencimientoCuota(base, i, frecuenciaCobro);
     totalIntereses += interes;
 
     cuotas.push({
@@ -167,21 +179,22 @@ export function calcularAmortizacionSoloInteresAdelantado(
   principal: number,
   tasaMensual: number,
   plazoMeses: number,
-  fechaInicio: Date = new Date()
+  fechaInicio: Date = new Date(),
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   if (plazoMeses <= 0) {
     return { cuotas: [], totalCapital: principal, totalIntereses: 0, totalPagar: principal, primeraCuota: 0, ultimaCuota: 0 };
   }
 
   const base = inicioDiaLocal(fechaInicio);
-  const interesMensual = round(principal * tasaMensual);
+  const r = tasaPorPeriodo(tasaMensual, frecuenciaCobro);
+  const interesMensual = round(principal * r);
   const cuotas: CuotaCalculada[] = [];
   let totalIntereses = 0;
 
-  // N cuotas de interés: cuota 1 en día 0, cuotas 2..N en meses 1..N-1
+  // N cuotas de interés: cuota 1 en día 0, cuotas 2..N en periodos 1..N-1
   for (let i = 1; i <= plazoMeses; i++) {
-    const fechaV = new Date(base);
-    fechaV.setMonth(fechaV.getMonth() + (i - 1));
+    const fechaV = fechaVencimientoCuotaAdelantada(base, i, frecuenciaCobro);
     totalIntereses += interesMensual;
     cuotas.push({
       numero: i,
@@ -193,9 +206,8 @@ export function calcularAmortizacionSoloInteresAdelantado(
     });
   }
 
-  // Cuota N+1: capital completo, sin interés, en mes N
-  const fechaCapital = new Date(base);
-  fechaCapital.setMonth(fechaCapital.getMonth() + plazoMeses);
+  // Cuota N+1: capital completo, sin interés, al final del plazo
+  const fechaCapital = fechaVencimientoCuota(base, plazoMeses, frecuenciaCobro);
   cuotas.push({
     numero: plazoMeses + 1,
     fechaVencimiento: fechaCapital,
@@ -227,7 +239,8 @@ export function calcularAmortizacionAnticipado(
   tasaMensual: number,
   plazoMeses: number,
   fechaInicio: Date = new Date(),
-  plazoDias?: number
+  plazoDias?: number,
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   const usarDias = plazoDias !== undefined && plazoDias > 0;
 
@@ -235,18 +248,16 @@ export function calcularAmortizacionAnticipado(
     return { cuotas: [], totalCapital: principal, totalIntereses: 0, totalPagar: principal, primeraCuota: 0, ultimaCuota: 0 };
   }
 
+  const r = tasaPorPeriodo(tasaMensual, frecuenciaCobro);
   const totalIntereses = usarDias
     ? round(principal * tasaMensual * plazoDias! / 30)
-    : round(principal * tasaMensual * plazoMeses);
+    : round(principal * r * plazoMeses);
 
   const base = inicioDiaLocal(fechaInicio);
   const fechaInteres = new Date(base);
-  const fechaCapital = new Date(base);
-  if (usarDias) {
-    fechaCapital.setDate(fechaCapital.getDate() + plazoDias!);
-  } else {
-    fechaCapital.setMonth(fechaCapital.getMonth() + plazoMeses);
-  }
+  const fechaCapital = usarDias
+    ? (() => { const d = new Date(base); d.setDate(d.getDate() + plazoDias!); return d; })()
+    : fechaVencimientoCuota(base, plazoMeses, frecuenciaCobro);
 
   const cuotas: CuotaCalculada[] = [
     {
@@ -283,16 +294,25 @@ export function calcularAmortizacion(
   tasaMensual: number,
   plazoMeses: number,
   fechaInicio?: Date,
-  plazoDias?: number
+  plazoDias?: number,
+  frecuenciaCobro: FrecuenciaCobro = 'mensual',
 ): ResumenAmortizacion {
   switch (tipo) {
-    case 'francesa':                return calcularAmortizacionFrancesa(principal, tasaMensual, plazoMeses, fechaInicio);
-    case 'alemana':                 return calcularAmortizacionAlemana(principal, tasaMensual, plazoMeses, fechaInicio);
-    case 'solo_interes':            return calcularAmortizacionSoloInteres(principal, tasaMensual, plazoMeses, fechaInicio);
-    case 'anticipado':              return calcularAmortizacionAnticipado(principal, tasaMensual, plazoMeses, fechaInicio, plazoDias);
-    case 'solo_interes_adelantado': return calcularAmortizacionSoloInteresAdelantado(principal, tasaMensual, plazoMeses, fechaInicio);
+    case 'francesa':
+      return calcularAmortizacionFrancesa(principal, tasaMensual, plazoMeses, fechaInicio, frecuenciaCobro);
+    case 'alemana':
+      return calcularAmortizacionAlemana(principal, tasaMensual, plazoMeses, fechaInicio, frecuenciaCobro);
+    case 'solo_interes':
+      return calcularAmortizacionSoloInteres(principal, tasaMensual, plazoMeses, fechaInicio, frecuenciaCobro);
+    case 'anticipado':
+      return calcularAmortizacionAnticipado(principal, tasaMensual, plazoMeses, fechaInicio, plazoDias, frecuenciaCobro);
+    case 'solo_interes_adelantado':
+      return calcularAmortizacionSoloInteresAdelantado(principal, tasaMensual, plazoMeses, fechaInicio, frecuenciaCobro);
   }
 }
+
+export type { FrecuenciaCobro } from './frecuenciaCobro';
+export { fechaVencimientoCuota, labelFrecuencia, textoPlazoCuotas } from './frecuenciaCobro';
 
 export function formatCurrency(value: number): string {
   const decimals = value % 1 !== 0 ? 2 : 0;

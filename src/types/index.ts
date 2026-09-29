@@ -61,6 +61,19 @@ export type TipoAmortizacion = 'francesa' | 'alemana' | 'solo_interes' | 'antici
 
 export type TipoPrestamo = 'prestamo' | 'credito_producto';
 
+export type FrecuenciaCobro = 'mensual' | 'quincenal' | 'semanal';
+
+export type OrigenCronograma = 'calculado' | 'manual';
+
+export type CuotaManualJson = { numero: number; capital: number };
+
+export type ContratoAdjunto = {
+  url: string;
+  nombre?: string;
+  mime_type?: string;
+  created_at?: string;
+};
+
 export interface Prestamo {
   id: string;
   cliente_id: string;
@@ -70,6 +83,9 @@ export interface Prestamo {
   tasa_mensual: number;
   plazo_meses: number;
   plazo_dias?: number;
+  frecuencia_cobro?: FrecuenciaCobro;
+  origen_cronograma?: OrigenCronograma;
+  cronograma_manual?: CuotaManualJson[] | null;
   tipo_amortizacion: TipoAmortizacion;
   tipo_prestamo: TipoPrestamo;
   descripcion_producto?: string;
@@ -79,6 +95,7 @@ export interface Prestamo {
   fecha_vencimiento?: string;
   observaciones?: string;
   contrato_url?: string;
+  contratos_adjuntos?: ContratoAdjunto[];
   prestamo_padre_id?: string;
   created_at: string;
   updated_at: string;

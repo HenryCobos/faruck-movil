@@ -13,7 +13,7 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Colors } from '@/constants/colors';
-import { calcularSaldoCapitalPendientePrestamo, formatCurrency } from '@/utils/amortizacion';
+import { calcularSaldoCapitalPendientePrestamo, formatCurrency, textoPlazoCuotas } from '@/utils/amortizacion';
 import { Cliente, Prestamo, ClienteEstado } from '@/types';
 
 const ESTADO_VARIANT: Record<ClienteEstado, any> = {
@@ -346,7 +346,7 @@ export default function ClienteDetailScreen() {
                   <Text style={styles.loanOriginal}>Original: {formatCurrency(montoOriginal)}</Text>
                 )}
                 <Text style={styles.loanSub}>
-                  {p.garantias?.tipo} · {p.plazo_meses} meses · {(p.tasa_mensual * 100).toFixed(1)}% mensual
+                  {p.garantias?.tipo} · {textoPlazoCuotas(p.plazo_meses, p.frecuencia_cobro)} · {(p.tasa_mensual * 100).toFixed(1)}% mensual
                 </Text>
                 <Text style={styles.loanDate}>{new Date(p.created_at).toLocaleDateString('es')}</Text>
               </TouchableOpacity>

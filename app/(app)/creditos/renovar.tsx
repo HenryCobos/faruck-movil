@@ -17,6 +17,7 @@ import { Select, SelectOption } from '@/components/ui/Select';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Colors } from '@/constants/colors';
 import { calcularAmortizacion, formatCurrency } from '@/utils/amortizacion';
+import { FRECUENCIA_COBRO_OPTIONS, type FrecuenciaCobro } from '@/utils/frecuenciaCobro';
 import { exportarCronogramaPdf } from '@/utils/cronogramaPdf';
 import { Cuota } from '@/types';
 
@@ -31,7 +32,8 @@ const AMORT_OPTIONS: SelectOption[] = [
 const schema = z.object({
   monto_principal:   z.coerce.number().min(1, 'El monto debe ser mayor a 0'),
   tasa_mensual:      z.coerce.number().min(0, 'La tasa no puede ser negativa').max(30, 'Tasa máxima 30%'),
-  plazo_meses:       z.coerce.number().min(1).max(120),
+  plazo_meses:       z.coerce.number().min(1).max(520),
+  frecuencia_cobro:  z.enum(['mensual', 'quincenal', 'semanal']).default('mensual'),
   tipo_amortizacion: z.enum(['francesa', 'alemana', 'solo_interes', 'anticipado', 'solo_interes_adelantado']),
   comision_apertura: z.coerce.number().min(0).optional(),
   observaciones:     z.string().optional(),
@@ -106,6 +108,7 @@ export default function RenovarPrestamoScreen() {
       monto_principal:   0,
       tasa_mensual:      3,
       plazo_meses:       12,
+      frecuencia_cobro:  'mensual',
       tipo_amortizacion: 'francesa',
       comision_apertura: 0,
       observaciones:     '',
@@ -129,6 +132,7 @@ export default function RenovarPrestamoScreen() {
           monto_principal:   saldo > 0 ? saldo : p.monto_principal,
           tasa_mensual:      parseFloat((p.tasa_mensual * 100).toFixed(4)),
           plazo_meses:       p.plazo_meses,
+          frecuencia_cobro:  (p.frecuencia_cobro as FrecuenciaCobro) ?? 'mensual',
           tipo_amortizacion: p.tipo_amortizacion,
           comision_apertura: 0,
           observaciones:     '',
@@ -143,6 +147,7 @@ export default function RenovarPrestamoScreen() {
 
   // ── Preview de amortización en tiempo real ───────────────────────────────
   const watchedFields = watch(['monto_principal', 'tasa_mensual', 'plazo_meses', 'tipo_amortizacion']);
+  const frecuenciaCobro = watch('frecuencia_cobro') as FrecuenciaCobro;
   const tipoSeleccionado = watchedFields[3] as string;
   const esAnticipado = tipoSeleccionado === 'anticipado';
 
@@ -161,13 +166,13 @@ export default function RenovarPrestamoScreen() {
         const plazoDias = calcularDiasAnticipado(fechaVencCapital);
         if (plazoDias <= 0) { setPreview(null); return; }
         const plazoMesesEfectivo = Math.ceil(plazoDias / 30) || 1;
-        setPreview(calcularAmortizacion(tipo as any, Number(monto), Number(tasa) / 100, plazoMesesEfectivo, fechaBasePreview, plazoDias));
+        setPreview(calcularAmortizacion(tipo as any, Number(monto), Number(tasa) / 100, plazoMesesEfectivo, fechaBasePreview, plazoDias, frecuenciaCobro));
       } else {
         if (!plazo) { setPreview(null); return; }
-        setPreview(calcularAmortizacion(tipo as any, Number(monto), Number(tasa) / 100, Number(plazo), fechaBasePreview));
+        setPreview(calcularAmortizacion(tipo as any, Number(monto), Number(tasa) / 100, Number(plazo), fechaBasePreview, undefined, frecuenciaCobro));
       }
     } catch { setPreview(null); }
-  }, [watchedFields.join(','), fechaBasePreview, fechaVencCapital, calcularDiasAnticipado]);
+  }, [watchedFields.join(','), fechaBasePreview, fechaVencCapital, calcularDiasAnticipado, frecuenciaCobro]);
 
   // ── Exportar PDF ─────────────────────────────────────────────────────────
   const handleExportarPdf = async () => {
@@ -205,7 +210,7 @@ export default function RenovarPrestamoScreen() {
       : Number(data.plazo_meses);
     const plazoDescripcion = esAnticipadoTipo && plazoDiasSubmit
       ? `${plazoDiasSubmit} días (vence ${fmtFecha(fechaVencCapital)})`
-      : `${data.plazo_meses} meses`;
+      : `${data.plazo_meses} cuotas (${data.frecuencia_cobro})`;
 
     Alert.alert(
       esPrestamActivo ? 'Confirmar Renovación Anticipada' : 'Confirmar Renovación',
@@ -227,6 +232,7 @@ export default function RenovarPrestamoScreen() {
                 nuevoTipo:          data.tipo_amortizacion,
                 nuevaComision:      Number(data.comision_apertura ?? 0),
                 nuevoPlazosDias:    plazoDiasSubmit,
+                frecuenciaCobro:    data.frecuencia_cobro,
                 observaciones:      data.observaciones,
               }, profile.id);
               router.replace(`/(app)/creditos/${nuevo.id}` as any);
@@ -358,7 +364,7 @@ export default function RenovarPrestamoScreen() {
                 <View style={styles.flex}>
                   <Controller control={control} name="plazo_meses" render={({ field: { onChange, value } }) => (
                     <Input
-                      label="Plazo (meses)"
+                      label="Número de cuotas"
                       placeholder="12"
                       value={String(value || '')}
                       onChangeText={onChange}
@@ -370,6 +376,17 @@ export default function RenovarPrestamoScreen() {
                 </View>
               )}
             </View>
+
+            {!esAnticipado && (
+              <Controller control={control} name="frecuencia_cobro" render={({ field: { onChange, value } }) => (
+                <Select
+                  label="Frecuencia de cobro"
+                  options={FRECUENCIA_COBRO_OPTIONS}
+                  value={value}
+                  onSelect={onChange}
+                />
+              )} />
+            )}
 
             <Controller control={control} name="tipo_amortizacion" render={({ field: { onChange, value } }) => (
               <Select label="Tipo de Amortización" options={AMORT_OPTIONS} value={value} onSelect={onChange} />
