@@ -1,4 +1,6 @@
 import { supabase, withTimeout } from '../lib/supabase';
+import { PRESTAMOS_ACTIVOS_CARTERA_SELECT } from './cartera.utils';
+import { sumaCapitalPendienteActivos } from '../utils/amortizacion';
 
 export interface DashboardStatsReal {
   cartera_total: number;
@@ -44,7 +46,7 @@ export const dashboardService = {
       resultadoMesRes,
       abonosHoyRes, abonosMesRes,
     ] = await withTimeout(Promise.all([
-      supabase.from('prestamos').select('monto_principal').eq('estado', 'activo'),
+      supabase.from('prestamos').select(PRESTAMOS_ACTIVOS_CARTERA_SELECT).eq('estado', 'activo'),
       supabase.from('prestamos').select('id', { count: 'exact' }).eq('estado', 'activo'),
       supabase.from('cuotas').select('id', { count: 'exact' }).eq('estado', 'vencida'),
       supabase.from('pagos').select('monto_pagado').gte('fecha_pago', hoy).eq('anulado', false),
@@ -62,8 +64,17 @@ export const dashboardService = {
       supabase.from('abonos_capital').select('monto_abono').gte('created_at', desdeMes).lt('created_at', hastaMes).eq('anulado', false),
     ]));
 
-    const cartera_total = (carteraRes.data ?? [])
-      .reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
+    let cartera_total: number;
+    if (!carteraRes.error) {
+      cartera_total = sumaCapitalPendienteActivos(carteraRes.data ?? []);
+    } else {
+      console.warn('[dashboard] cartera con cuotas falló:', carteraRes.error.message);
+      const fb = await supabase
+        .from('prestamos')
+        .select('monto_principal, estado')
+        .eq('estado', 'activo');
+      cartera_total = fb.error ? 0 : sumaCapitalPendienteActivos(fb.data ?? []);
+    }
 
     const cobros_hoy_pagos   = (cobrosHoyRes.data ?? []).reduce((s: number, p: any) => s + Number(p.monto_pagado), 0);
     const cobros_hoy_abonos  = (abonosHoyRes.data ?? []).reduce((s: number, a: any) => s + Number(a.monto_abono), 0);

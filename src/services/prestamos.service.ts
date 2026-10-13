@@ -10,6 +10,10 @@ import {
   storagePathFromPublicUrl,
 } from '../utils/contratosAdjuntos';
 import * as FileSystem from 'expo-file-system/legacy';
+import {
+  PrestamoRenovacionHijo,
+  PrestamoRenovadoConHijosError,
+} from '../utils/prestamoRenovacion';
 
 export type RenovarPrestamoDTO = {
   prestamoAnteriorId: string;
@@ -52,14 +56,27 @@ export type CreateCreditoProductoDTO = {
 
 export const prestamosService = {
   async getAll(): Promise<Prestamo[]> {
-    const { data, error } = await withTimeout(
+    const withCuotas = await withTimeout(
+      supabase
+        .from('prestamos')
+        .select(`
+          *,
+          clientes(nombre, apellido, alias, telefono, documento_numero),
+          garantias(tipo, descripcion, valor_avaluo),
+          cuotas(estado, capital, interes, pagos(monto_pagado, mora_cobrada, anulado))
+        `)
+        .order('created_at', { ascending: false }),
+    );
+    if (!withCuotas.error) return withCuotas.data ?? [];
+
+    const fallback = await withTimeout(
       supabase
         .from('prestamos')
         .select('*, clientes(nombre, apellido, alias, telefono, documento_numero), garantias(tipo, descripcion, valor_avaluo)')
         .order('created_at', { ascending: false }),
     );
-    if (error) throw error;
-    return data ?? [];
+    if (fallback.error) throw fallback.error;
+    return fallback.data ?? [];
   },
 
   async getById(id: string): Promise<Prestamo> {
@@ -291,6 +308,22 @@ export const prestamosService = {
     return urlData.publicUrl;
   },
 
+  async getHijosRenovacion(prestamoPadreId: string): Promise<PrestamoRenovacionHijo[]> {
+    const { data, error } = await supabase
+      .from('prestamos')
+      .select('id, estado, monto_principal, created_at')
+      .eq('prestamo_padre_id', prestamoPadreId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (error) throw error;
+    return (data ?? []).map((row: any) => ({
+      id: row.id,
+      estado: row.estado,
+      monto_principal: Number(row.monto_principal ?? 0),
+      created_at: row.created_at,
+    }));
+  },
+
   async eliminar(id: string): Promise<void> {
     const { data: prestamo, error: fetchError } = await supabase
       .from('prestamos')
@@ -298,6 +331,11 @@ export const prestamosService = {
       .eq('id', id)
       .single();
     if (fetchError) throw fetchError;
+
+    const hijos = await this.getHijosRenovacion(id);
+    if (hijos.length > 0) {
+      throw new PrestamoRenovadoConHijosError(hijos[0], hijos.length);
+    }
 
     // 1. Obtener IDs de todas las cuotas del préstamo
     const { data: cuotasData, error: cuotasError } = await supabase

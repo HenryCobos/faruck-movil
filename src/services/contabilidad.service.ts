@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { configuracionService, Configuracion } from './configuracion.service';
+import { capitalPendienteDesdeFetch, fetchPrestamosActivosParaCartera } from './cartera.utils';
 
 export interface AsientoContable {
   id: string;
@@ -86,24 +87,18 @@ export const contabilidadService = {
     const desde = inicioMes.toISOString().split('T')[0];
     const hasta = new Date().toISOString().split('T')[0];
 
-    const [asientosRes, carteraRes] = await Promise.all([
+    const [asientosRes, carteraFetch] = await Promise.all([
       supabase
         .from('asientos_contables')
         .select('haber, debe, plan_cuentas(tipo, codigo)')
         .gte('fecha', desde)
         .lte('fecha', hasta),
-      supabase
-        .from('prestamos')
-        .select('monto_principal')
-        .eq('estado', 'activo'),
+      fetchPrestamosActivosParaCartera(),
     ]);
 
     if (asientosRes.error) throw asientosRes.error;
-    if (carteraRes.error) throw carteraRes.error;
 
     const asientos = asientosRes.data ?? [];
-    const cartera = carteraRes.data ?? [];
-
     const ingresos_mes = asientos
       .filter((a: any) => a.plan_cuentas?.tipo === 'ingreso')
       .reduce((s: number, a: any) => s + Number(a.haber), 0);
@@ -116,8 +111,7 @@ export const contabilidadService = {
       .filter((a: any) => a.plan_cuentas?.codigo === '1110')
       .reduce((s: number, a: any) => s + Number(a.debe), 0);
 
-    const cartera_vigente = cartera
-      .reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
+    const cartera_vigente = capitalPendienteDesdeFetch(carteraFetch);
 
     return {
       ingresos_mes: Math.round(ingresos_mes * 100) / 100,

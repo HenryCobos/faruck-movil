@@ -30,6 +30,12 @@ import {
   displayNombre,
   MAX_CONTRATOS_ADJUNTOS,
 } from '@/utils/contratosAdjuntos';
+import {
+  type PrestamoRenovacionHijo,
+  mensajePrestamoRenovadoConHijos,
+  parsePrestamoRenovadoHijoId,
+  mensajeUsuarioDesdeErrorEliminar,
+} from '@/utils/prestamoRenovacion';
 
 const ESTADO_VARIANT: Record<string, any> = {
   solicitado: 'warning', aprobado: 'info', activo: 'success',
@@ -172,6 +178,22 @@ export default function CreditoDetailScreen() {
   const [showActivarModal, setShowActivarModal] = useState(false);
   const [fechaDesembolso, setFechaDesembolso] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [prestamoHijoRenovacion, setPrestamoHijoRenovacion] = useState<PrestamoRenovacionHijo | null>(null);
+  const [hijosRenovacionCount, setHijosRenovacionCount] = useState(0);
+
+  const alertPrestamoRenovadoNoEliminable = useCallback((hijo: PrestamoRenovacionHijo, totalHijos: number) => {
+    Alert.alert(
+      'No se puede eliminar',
+      mensajePrestamoRenovadoConHijos(hijo, totalHijos),
+      [
+        { text: 'Cerrar', style: 'cancel' },
+        {
+          text: 'Ver préstamo de renovación',
+          onPress: () => router.push(`/(app)/creditos/${hijo.id}${fromClienteId ? `?fromClienteId=${fromClienteId}` : ''}` as any),
+        },
+      ],
+    );
+  }, [fromClienteId]);
 
   const load = useCallback(async () => {
     if (!id) { setLoading(false); return; }
@@ -186,6 +208,14 @@ export default function CreditoDetailScreen() {
       setCuotas(cs);
       setPagos(ps);
       setAbonos(abs);
+      if (p.estado === 'renovado') {
+        const hijos = await prestamosService.getHijosRenovacion(id);
+        setPrestamoHijoRenovacion(hijos[0] ?? null);
+        setHijosRenovacionCount(hijos.length);
+      } else {
+        setPrestamoHijoRenovacion(null);
+        setHijosRenovacionCount(0);
+      }
     } catch {
       Alert.alert('Error', 'No se pudo cargar el préstamo');
       router.canGoBack() ? router.back() : router.replace('/(app)/creditos');
@@ -354,6 +384,11 @@ export default function CreditoDetailScreen() {
   const handleEliminar = () => {
     if (!id || !prestamo) return;
 
+    if (prestamoHijoRenovacion) {
+      alertPrestamoRenovadoNoEliminable(prestamoHijoRenovacion, hijosRenovacionCount || 1);
+      return;
+    }
+
     // Activo con pagos vigentes → debe cancelarse primero
     if (prestamo.estado === 'activo') {
       const pagosVigentes = pagos.filter((p: PagoRegistrado) => !p.anulado);
@@ -382,6 +417,18 @@ export default function CreditoDetailScreen() {
               await prestamosService.eliminar(id);
               router.replace('/(app)/creditos' as any);
             } catch (e: any) {
+              const hijoId = parsePrestamoRenovadoHijoId(e?.message);
+              const userMsg = mensajeUsuarioDesdeErrorEliminar(e?.message);
+              if (hijoId && userMsg) {
+                Alert.alert('No se puede eliminar', userMsg, [
+                  { text: 'Cerrar', style: 'cancel' },
+                  {
+                    text: 'Ver préstamo de renovación',
+                    onPress: () => router.push(`/(app)/creditos/${hijoId}${fromClienteId ? `?fromClienteId=${fromClienteId}` : ''}` as any),
+                  },
+                ]);
+                return;
+              }
               Alert.alert('Error', e.message ?? 'No se pudo eliminar el préstamo');
             }
           },
@@ -851,6 +898,15 @@ export default function CreditoDetailScreen() {
           {prestamo.prestamo_padre_id && (
             <TouchableOpacity onPress={() => router.push(`/(app)/creditos/${prestamo.prestamo_padre_id}${fromClienteId ? `?fromClienteId=${fromClienteId}` : ''}` as any)}>
               <InfoRow label="🔄 Renovación de" value={`#${prestamo.prestamo_padre_id.slice(-8).toUpperCase()} →`} color={Colors.info} />
+            </TouchableOpacity>
+          )}
+          {prestamoHijoRenovacion && (
+            <TouchableOpacity onPress={() => router.push(`/(app)/creditos/${prestamoHijoRenovacion.id}${fromClienteId ? `?fromClienteId=${fromClienteId}` : ''}` as any)}>
+              <InfoRow
+                label="🔄 Préstamo de renovación"
+                value={`#${prestamoHijoRenovacion.id.slice(-8).toUpperCase()} →`}
+                color={Colors.info}
+              />
             </TouchableOpacity>
           )}
           {prestamo.observaciones?.trim() ? (

@@ -4,7 +4,13 @@ import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { prestamosService } from '@/services/prestamos.service';
-import { parseFechaLocal } from '@/utils/amortizacion';
+import {
+  parseFechaLocal,
+  formatCurrency,
+  textoPlazoCuotas,
+  saldoCapitalPrestamoActivo,
+  mostrarLineaOriginalActivo,
+} from '@/utils/amortizacion';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
@@ -29,6 +35,12 @@ function PrestamoCard({ item }: { item: any }) {
   const cliente = item.clientes;
   const garantia = item.garantias;
   const esProducto = item.tipo_prestamo === 'credito_producto';
+  const esActivo = item.estado === 'activo';
+  const montoOriginal = Number(item.monto_principal ?? 0);
+  const saldoCapital = esActivo ? saldoCapitalPrestamoActivo(item) : null;
+  const muestraOriginal = esActivo && saldoCapital != null && mostrarLineaOriginalActivo(saldoCapital, montoOriginal);
+  const montoGrande = esActivo ? formatCurrency(saldoCapital!) : formatCurrency(montoOriginal);
+
   return (
     <TouchableOpacity
       style={[styles.card, item.estado === 'vencido' && styles.cardVencido, esProducto && styles.cardProducto]}
@@ -38,13 +50,16 @@ function PrestamoCard({ item }: { item: any }) {
       <View style={styles.cardTop}>
         <View style={{ flex: 1, marginRight: 8 }}>
           <View style={styles.cardTitleRow}>
-            <Text style={styles.cardAmount}>${item.monto_principal?.toLocaleString('es')}</Text>
+            <Text style={styles.cardAmount}>{montoGrande}</Text>
             {esProducto && (
               <View style={styles.tipoBadge}>
                 <Text style={styles.tipoBadgeText}>🏷️ Producto</Text>
               </View>
             )}
           </View>
+          {muestraOriginal && (
+            <Text style={styles.cardOriginal}>Original: {formatCurrency(montoOriginal)}</Text>
+          )}
           <Text style={styles.cardClient}>
             {cliente?.nombre} {cliente?.apellido}
             {!!cliente?.alias && <Text style={styles.cardAlias}> · {cliente.alias}</Text>}
@@ -58,8 +73,8 @@ function PrestamoCard({ item }: { item: any }) {
       <View style={styles.cardBottom}>
         <Text style={styles.cardDetail}>
           {esProducto
-            ? `${item.plazo_meses} cuota(s) · sin interés`
-            : `${garantia ? `${TIPO_ICON[garantia.tipo] ?? '📦'} ${garantia.tipo} · ` : ''}${item.plazo_meses} meses · ${(item.tasa_mensual * 100).toFixed(1)}% mes`}
+            ? `${textoPlazoCuotas(item.plazo_meses, item.frecuencia_cobro)} · sin interés`
+            : `${garantia ? `${TIPO_ICON[garantia.tipo] ?? '📦'} ${garantia.tipo} · ` : ''}${textoPlazoCuotas(item.plazo_meses, item.frecuencia_cobro)} · ${(item.tasa_mensual * 100).toFixed(1)}% mensual`}
         </Text>
         <Text style={styles.cardDate}>
           {item.fecha_desembolso
@@ -114,9 +129,10 @@ export default function CreditosListScreen() {
   const onSearch = (text: string) => setSearch(text);
   const onFiltro = (estado: string) => setFiltroEstado(estado);
 
+  const prestamosActivos = prestamos.filter(p => p.estado === 'activo');
   const stats = {
-    total: prestamos.filter(p => p.estado === 'activo').reduce((s, p) => s + p.monto_principal, 0),
-    activos: prestamos.filter(p => p.estado === 'activo').length,
+    carteraActiva: prestamosActivos.reduce((s, p) => s + saldoCapitalPrestamoActivo(p), 0),
+    activos: prestamosActivos.length,
     vencidos: prestamos.filter(p => p.estado === 'vencido').length,
   };
 
@@ -142,7 +158,7 @@ export default function CreditosListScreen() {
         </View>
         <View style={styles.statsRow}>
           <View style={styles.statChip}>
-            <Text style={styles.statVal}>${(stats.total / 1000).toFixed(1)}k</Text>
+            <Text style={styles.statVal}>${(stats.carteraActiva / 1000).toFixed(1)}k</Text>
             <Text style={styles.statLbl}>Cartera</Text>
           </View>
           <View style={styles.statChip}>
@@ -210,6 +226,7 @@ const styles = StyleSheet.create({
   cardVencido: { borderLeftWidth: 3, borderLeftColor: Colors.danger },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   cardAmount: { fontSize: 20, fontWeight: '800', color: Colors.text },
+  cardOriginal: { fontSize: 11, color: Colors.muted, marginTop: -2 },
   cardClient: { fontSize: 13, color: Colors.muted, marginTop: 2 },
   cardAlias: { fontSize: 12, color: Colors.primary, fontWeight: '600', fontStyle: 'italic' },
   cardBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

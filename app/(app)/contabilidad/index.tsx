@@ -110,7 +110,7 @@ export default function ContabilidadScreen() {
         <View style={styles.kpiGrid}>
           <KPICard label="Ingresos Totales" value={formatCurrency(resumen?.ingresos_mes ?? 0)} icon="📈" color={Colors.success} />
           <KPICard label="Total Cobrado" value={formatCurrency(resumen?.total_cobrado_mes ?? 0)} icon="💳" color={Colors.info} />
-          <KPICard label="Cartera Vigente" value={formatCurrency(resumen?.cartera_vigente ?? 0)} icon="📂" color={Colors.accent} sub="Préstamos activos" />
+          <KPICard label="Cartera Vigente" value={formatCurrency(resumen?.cartera_vigente ?? 0)} icon="📂" color={Colors.accent} sub="Capital pendiente" />
         </View>
 
         {/* Módulos */}

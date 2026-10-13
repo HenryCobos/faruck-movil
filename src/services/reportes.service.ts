@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { configuracionService, Configuracion } from './configuracion.service';
+import { saldoCapitalPrestamoActivo, sumaCapitalPendienteActivos } from '../utils/amortizacion';
 
 export interface PrestamoCartera {
   id: string;
@@ -56,7 +57,7 @@ export const reportesService = {
         id, monto_principal, tasa_mensual, plazo_meses, fecha_desembolso, estado,
         clientes(nombre, apellido, documento_numero),
         garantias(tipo, descripcion),
-        cuotas(id, estado, monto_total, capital, interes),
+        cuotas(id, estado, monto_total, capital, interes, pagos(monto_pagado, mora_cobrada, anulado)),
         abonos_capital(monto_abono, anulado)
       `)
       .order('created_at', { ascending: false });
@@ -74,9 +75,11 @@ export const reportesService = {
     return (data ?? []).map((p: any) => {
       const cuotas = p.cuotas ?? [];
       const cuotasPagadas = cuotas.filter((c: any) => c.estado === 'pagada');
-      const cuotasPendientes = cuotas.filter((c: any) => c.estado !== 'pagada');
+      const principal          = Number(p.monto_principal);
 
-      const saldo_pendiente    = cuotasPendientes.reduce((s: number, c: any) => s + Number(c.capital), 0);
+      const saldo_pendiente    = (p.estado === 'activo' || p.estado === 'vencido')
+        ? saldoCapitalPrestamoActivo({ monto_principal: principal, cuotas })
+        : 0;
       const interes_proyectado = cuotas.reduce((s: number, c: any) => s + Number(c.interes), 0);
       const interes_cobrado    = cuotasPagadas.reduce((s: number, c: any) => s + Number(c.interes), 0);
       const total_a_cobrar     = cuotas.reduce((s: number, c: any) => s + Number(c.monto_total), 0);
@@ -84,7 +87,6 @@ export const reportesService = {
       // Solo abonos vigentes (no anulados) como capital cobrado fuera de cuotas normales
       const capital_abonado    = (p.abonos_capital ?? []).filter((a: any) => !a.anulado).reduce((s: number, a: any) => s + Number(a.monto_abono), 0);
       const total_cobrado      = capital_cobrado + interes_cobrado + capital_abonado;
-      const principal          = Number(p.monto_principal);
 
       return {
         id: p.id,
@@ -113,7 +115,7 @@ export const reportesService = {
   async getResumenCartera(): Promise<ResumenCartera> {
     const { data, error } = await supabase
       .from('prestamos')
-      .select('estado, monto_principal, cuotas(estado, capital, interes, monto_total), abonos_capital(monto_abono, anulado)');
+      .select('estado, monto_principal, cuotas(estado, capital, interes, monto_total, pagos(monto_pagado, mora_cobrada, anulado)), abonos_capital(monto_abono, anulado)');
     if (error) throw error;
 
     const prestamos  = data ?? [];
@@ -125,9 +127,7 @@ export const reportesService = {
     const activosList = prestamos.filter((p: any) => p.estado === 'activo');
 
     const monto_total  = activosList.reduce((s: number, p: any) => s + Number(p.monto_principal), 0);
-    const monto_cobrar = activosList.reduce((s: number, p: any) =>
-      s + (p.cuotas ?? []).filter((c: any) => c.estado !== 'pagada')
-        .reduce((cs: number, c: any) => cs + Number(c.capital), 0), 0);
+    const monto_cobrar = sumaCapitalPendienteActivos(activosList);
 
     const cuotas_vencidas = prestamos.reduce((s: number, p: any) =>
       s + (p.cuotas ?? []).filter((c: any) => c.estado === 'vencida').length, 0);

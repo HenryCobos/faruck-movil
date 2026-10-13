@@ -404,6 +404,43 @@ export function calcularSaldoCapitalPendientePrestamo(cuotas: CuotaSaldoInput[])
     }, 0);
 }
 
+export type PrestamoSaldoCapitalInput = {
+  monto_principal?: number | null;
+  cuotas?: CuotaSaldoInput[];
+};
+
+/** Capital pendiente para préstamo activo (lista/ficha); fallback a monto principal sin cuotas. */
+export function saldoCapitalPrestamoActivo(p: PrestamoSaldoCapitalInput): number {
+  const cuotas = p.cuotas;
+  if (!cuotas?.length) return Number(p.monto_principal ?? 0);
+  return calcularSaldoCapitalPendientePrestamo(cuotas);
+}
+
+/** Muestra línea "Original:" cuando el saldo activo es menor que el monto desembolsado. */
+export function mostrarLineaOriginalActivo(saldoCapital: number, montoOriginal: number): boolean {
+  return saldoCapital < montoOriginal - 0.01;
+}
+
+export type PrestamoConEstadoSaldo = PrestamoSaldoCapitalInput & { estado?: string };
+
+/** Suma capital pendiente de préstamos con estado activo. */
+export function sumaCapitalPendienteActivos(prestamos: PrestamoConEstadoSaldo[]): number {
+  const total = prestamos
+    .filter(p => p.estado === 'activo')
+    .reduce((s, p) => s + saldoCapitalPrestamoActivo(p), 0);
+  return Math.round(total * 100) / 100;
+}
+
+/** Suma monto_principal de préstamos activos (desembolsado). */
+export function sumaMontoPrincipalActivos(
+  prestamos: Array<{ monto_principal?: number | null; estado?: string }>,
+): number {
+  const total = prestamos
+    .filter(p => p.estado === 'activo')
+    .reduce((s, p) => s + Number(p.monto_principal ?? 0), 0);
+  return Math.round(total * 100) / 100;
+}
+
 /** Asignación interés-primero de un pago sobre saldos restantes. */
 export function calcularAsignacionPago(
   capital: number,

@@ -94,8 +94,8 @@ function BannerRentabilidad({ resumen }: { resumen: ResumenCartera }) {
   return (
     <View style={styles.banner}>
       <View style={styles.bannerItem}>
-        <Text style={styles.bannerValue}>{formatCurrency(resumen.monto_total_cartera)}</Text>
-        <Text style={styles.bannerLabel}>Capital en cartera</Text>
+        <Text style={styles.bannerValue}>{formatCurrency(resumen.monto_por_cobrar)}</Text>
+        <Text style={styles.bannerLabel}>Capital pendiente</Text>
       </View>
       <View style={styles.bannerDivider} />
       <View style={styles.bannerItem}>

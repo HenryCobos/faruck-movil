@@ -13,7 +13,12 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Colors } from '@/constants/colors';
-import { calcularSaldoCapitalPendientePrestamo, formatCurrency, textoPlazoCuotas } from '@/utils/amortizacion';
+import {
+  formatCurrency,
+  textoPlazoCuotas,
+  saldoCapitalPrestamoActivo,
+  mostrarLineaOriginalActivo,
+} from '@/utils/amortizacion';
 import { Cliente, Prestamo, ClienteEstado } from '@/types';
 
 const ESTADO_VARIANT: Record<ClienteEstado, any> = {
@@ -38,12 +43,6 @@ function scoringColor(s: number) {
   if (s >= 75) return Colors.success;
   if (s >= 50) return Colors.warning;
   return Colors.danger;
-}
-
-function saldoCapitalActivo(p: Prestamo & { cuotas?: Parameters<typeof calcularSaldoCapitalPendientePrestamo>[0] }): number {
-  const cuotas = p.cuotas;
-  if (!cuotas?.length) return Number(p.monto_principal ?? 0);
-  return calcularSaldoCapitalPendientePrestamo(cuotas);
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -178,7 +177,7 @@ export default function ClienteDetailScreen() {
   const sc = scoringColor(cliente.scoring);
   const prestamosActivos = prestamos.filter(p => p.estado === 'activo');
   const totalCarteraActiva = prestamosActivos.reduce(
-    (sum, p) => sum + saldoCapitalActivo(p), 0,
+    (sum, p) => sum + saldoCapitalPrestamoActivo(p), 0,
   );
 
   return (
@@ -325,9 +324,9 @@ export default function ClienteDetailScreen() {
           ) : (
             prestamos.map((p: any) => {
               const esActivo = p.estado === 'activo';
-              const saldoCapital = esActivo ? saldoCapitalActivo(p) : null;
+              const saldoCapital = esActivo ? saldoCapitalPrestamoActivo(p) : null;
               const montoOriginal = Number(p.monto_principal ?? 0);
-              const muestraOriginal = esActivo && saldoCapital != null && saldoCapital < montoOriginal - 0.01;
+              const muestraOriginal = esActivo && saldoCapital != null && mostrarLineaOriginalActivo(saldoCapital, montoOriginal);
 
               return (
               <TouchableOpacity

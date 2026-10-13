@@ -101,7 +101,7 @@ export default function ReportesScreen() {
           <View style={styles.overviewBottom}>
             <View style={styles.overviewBig}>
               <Text style={styles.overviewBigLabel}>Cartera vigente</Text>
-              <Text style={styles.overviewBigValue}>{formatCurrency(resumen?.monto_total_cartera ?? 0)}</Text>
+              <Text style={styles.overviewBigValue}>{formatCurrency(resumen?.monto_por_cobrar ?? 0)}</Text>
             </View>
             <View style={[styles.overviewBig, styles.overviewBigRight]}>
               <Text style={styles.overviewBigLabel}>Cuotas vencidas</Text>

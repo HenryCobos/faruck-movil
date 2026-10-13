@@ -185,7 +185,7 @@ export default function DashboardScreen() {
           ) : role === 'admin' || role === 'oficial' ? (
             <View style={styles.statsGrid}>
               <View style={styles.statsRow}>
-                <StatCard label="Cartera Total" value={formatCurrency(stats?.cartera_total ?? 0)} color={Colors.accent} icon="💰" trend="préstamos activos" trendUp />
+                <StatCard label="Cartera activa" value={formatCurrency(stats?.cartera_total ?? 0)} color={Colors.accent} icon="💰" trend="capital pendiente" trendUp />
                 <StatCard label="Préstamos Activos" value={String(stats?.prestamos_activos ?? 0)} color={Colors.info} icon="📋" />
               </View>
               <View style={styles.statsRow}>

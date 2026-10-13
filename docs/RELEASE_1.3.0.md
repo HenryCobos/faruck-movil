@@ -19,6 +19,8 @@ Verificar con [`supabase/verificar_release_1_3_0.sql`](../supabase/verificar_rel
 
 ## 2. Build iOS
 
+**Build 1.3.0 (18)** — [EAS build logs](https://expo.dev/accounts/henryapper/projects/faruck-movil/builds/89df6862-f86e-4330-aa36-3e9f86294a8d) · [submission](https://expo.dev/accounts/henryapper/projects/faruck-movil/submissions/6e24094f-fa30-474e-9708-d19cf09ade01)
+
 ```bash
 cd /Users/henryrimarachincobos/faruck-movil
 npx eas-cli build --platform ios --profile production --auto-submit
