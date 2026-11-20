@@ -2,7 +2,7 @@
 
 **Producción anterior:** 1.3.2 (build 20)  
 **Objetivo:** 1.3.3 (build 21 vía EAS `autoIncrement`)  
-**Commit de referencia:** ejecutar `git rev-parse HEAD` tras el commit de release 1.3.3.
+**Commit de referencia:** `3247eab` (release 1.3.3); base 1.3.2 en App Store: tag `v1.3.2` → `901a9f3`.
 
 ## Cambios incluidos (delta respecto a 1.3.2)
 
