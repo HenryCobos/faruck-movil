@@ -34,11 +34,12 @@ where table_schema = 'public'
 ```bash
 cd /Users/henryrimarachincobos/faruck-movil
 npx tsc --noEmit
-npx eas-cli build:version:set --platform ios --profile production
 npx eas-cli build --platform ios --profile production --auto-submit
 ```
 
-Con `appVersionSource: remote` en [eas.json](../eas.json), confirmar en `build:version:set` que la **app version** es `1.3.3`; el build number sube con `autoIncrement`.
+Versión **1.3.3** y build **21**: [`app.json`](../app.json) (`expo.version`, `ios.buildNumber` en 20) + [`eas.json`](../eas.json) con `appVersionSource: "local"` y `autoIncrement` en production (siguiente build = 21).
+
+Si volvés a `appVersionSource: remote`, ejecutá antes `npx eas-cli build:version:set -p ios` en terminal interactiva para fijar la versión en EAS.
 
 ## App Store Connect — What's New (español)
 
