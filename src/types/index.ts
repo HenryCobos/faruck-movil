@@ -61,6 +61,15 @@ export type TipoAmortizacion = 'francesa' | 'alemana' | 'solo_interes' | 'antici
 
 export type TipoPrestamo = 'prestamo' | 'credito_producto';
 
+export type CategoriaProducto =
+  | 'celular'
+  | 'vehiculo'
+  | 'inmueble'
+  | 'joya'
+  | 'electrodomestico'
+  | 'motocicleta'
+  | 'otro';
+
 export type FrecuenciaCobro = 'mensual' | 'quincenal' | 'semanal';
 
 export type OrigenCronograma = 'calculado' | 'manual';
@@ -89,6 +98,8 @@ export interface Prestamo {
   tipo_amortizacion: TipoAmortizacion;
   tipo_prestamo: TipoPrestamo;
   descripcion_producto?: string;
+  categoria_producto?: CategoriaProducto;
+  categoria_producto_otro?: string;
   comision_apertura: number;
   estado: PrestamoEstado;
   fecha_desembolso?: string;

@@ -2,7 +2,13 @@ import { supabase, withTimeout } from '../lib/supabase';
 import { Prestamo, Cuota, AbonoCapital, ResultadoAbonoCapital, ResultadoAnulacionAbono } from '../types';
 import { auditoriaService } from './auditoria.service';
 import { parseFechaLocal, formatFechaISO, fechaVencimientoCuota } from '../utils/amortizacion';
-import type { FrecuenciaCobro, OrigenCronograma, CuotaManualJson, ContratoAdjunto } from '../types';
+import type {
+  FrecuenciaCobro,
+  OrigenCronograma,
+  CuotaManualJson,
+  ContratoAdjunto,
+  CategoriaProducto,
+} from '../types';
 import {
   MAX_CONTRATOS_ADJUNTOS,
   parseContratosAdjuntos,
@@ -14,6 +20,7 @@ import {
   PrestamoRenovacionHijo,
   PrestamoRenovadoConHijosError,
 } from '../utils/prestamoRenovacion';
+import { etiquetaCategoriaProducto } from '../constants/categoriasProducto';
 
 export type RenovarPrestamoDTO = {
   prestamoAnteriorId: string;
@@ -40,11 +47,15 @@ export type CreatePrestamoDTO = {
   frecuencia_cobro?: FrecuenciaCobro;
   origen_cronograma?: OrigenCronograma;
   cronograma_manual?: CuotaManualJson[] | null;
+  categoria_producto?: CategoriaProducto;
+  categoria_producto_otro?: string;
 };
 
 export type CreateCreditoProductoDTO = {
   cliente_id: string;
   descripcion_producto: string;
+  categoria_producto: CategoriaProducto;
+  categoria_producto_otro?: string;
   monto_principal: number;
   plazo_meses: number;
   garantia_id?: string;
@@ -104,15 +115,24 @@ export const prestamosService = {
   },
 
   async create(dto: CreatePrestamoDTO, oficialId: string): Promise<Prestamo> {
+    const tieneCategoria = !!dto.categoria_producto;
+    const { categoria_producto, categoria_producto_otro, ...rest } = dto;
     const { data, error } = await supabase
       .from('prestamos')
       .insert({
-        ...dto,
+        ...rest,
         oficial_id: oficialId,
         comision_apertura: dto.comision_apertura ?? 0,
         frecuencia_cobro: dto.frecuencia_cobro ?? 'mensual',
         origen_cronograma: dto.origen_cronograma ?? 'calculado',
         cronograma_manual: dto.origen_cronograma === 'manual' ? dto.cronograma_manual ?? null : null,
+        ...(tieneCategoria
+          ? {
+              categoria_producto,
+              categoria_producto_otro:
+                categoria_producto === 'otro' ? (categoria_producto_otro?.trim() ?? null) : null,
+            }
+          : {}),
       })
       .select()
       .single();
@@ -133,6 +153,38 @@ export const prestamosService = {
     }).catch(() => {});
 
     return data;
+  },
+
+  async updateCategoriaProducto(
+    prestamoId: string,
+    payload: { categoria_producto: CategoriaProducto | null; categoria_producto_otro?: string | null },
+  ): Promise<void> {
+    const row: Record<string, string | null> = {
+      categoria_producto: payload.categoria_producto,
+      categoria_producto_otro:
+        payload.categoria_producto === 'otro'
+          ? (payload.categoria_producto_otro?.trim() ?? null)
+          : null,
+    };
+    const { error } = await supabase
+      .from('prestamos')
+      .update(row)
+      .eq('id', prestamoId);
+    if (error) throw error;
+
+    const etiqueta = payload.categoria_producto
+      ? etiquetaCategoriaProducto(payload.categoria_producto, payload.categoria_producto_otro)
+      : null;
+
+    auditoriaService.registrar({
+      tabla: 'prestamos',
+      accion: 'actualizar',
+      registroId: prestamoId,
+      descripcion: etiqueta
+        ? `Categoría del crédito actualizada: ${etiqueta}`
+        : 'Categoría del crédito eliminada',
+      datos: { categoria_producto: payload.categoria_producto, categoria_producto_otro: row.categoria_producto_otro },
+    }).catch(() => {});
   },
 
   async aprobar(id: string, aprobadoPorId: string): Promise<void> {
@@ -440,6 +492,9 @@ export const prestamosService = {
       tipo_amortizacion: 'francesa',
       tipo_prestamo: 'credito_producto',
       descripcion_producto: dto.descripcion_producto,
+      categoria_producto: dto.categoria_producto,
+      categoria_producto_otro:
+        dto.categoria_producto === 'otro' ? (dto.categoria_producto_otro?.trim() ?? null) : null,
       comision_apertura: 0,
       observaciones: dto.observaciones ?? null,
       frecuencia_cobro: dto.frecuencia_cobro ?? 'mensual',

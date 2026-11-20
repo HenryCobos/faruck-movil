@@ -1,5 +1,6 @@
 import { supabase, withTimeout } from '../lib/supabase';
 import { PRESTAMOS_ACTIVOS_CARTERA_SELECT } from './cartera.utils';
+import { cobrosService } from './cobros.service';
 import { sumaCapitalPendienteActivos } from '../utils/amortizacion';
 
 export interface DashboardStatsReal {
@@ -40,7 +41,7 @@ export const dashboardService = {
     const manana = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
 
     const [
-      carteraRes, activosRes, vencidasRes,
+      carteraRes, activosRes, cuotasVencidasCalendario,
       cobrosHoyRes, pendientesHoyRes,
       ingresosRes, clientesRes, garantiasRes,
       resultadoMesRes,
@@ -48,7 +49,7 @@ export const dashboardService = {
     ] = await withTimeout(Promise.all([
       supabase.from('prestamos').select(PRESTAMOS_ACTIVOS_CARTERA_SELECT).eq('estado', 'activo'),
       supabase.from('prestamos').select('id', { count: 'exact' }).eq('estado', 'activo'),
-      supabase.from('cuotas').select('id', { count: 'exact' }).eq('estado', 'vencida'),
+      cobrosService.countCuotasVencidasCalendario(hoy),
       supabase.from('pagos').select('monto_pagado').gte('fecha_pago', hoy).eq('anulado', false),
       supabase.from('cuotas').select('id', { count: 'exact' })
         .eq('estado', 'pendiente').eq('fecha_vencimiento', hoy),
@@ -96,7 +97,7 @@ export const dashboardService = {
     return {
       cartera_total:         Math.round(cartera_total * 100) / 100,
       prestamos_activos:     activosRes.count ?? 0,
-      cuotas_vencidas:       vencidasRes.count ?? 0,
+      cuotas_vencidas:       cuotasVencidasCalendario,
       ingresos_mes:          Math.round(total_cobrado_mes * 100) / 100,
       ingresos_contables_mes,
       cobros_hoy:            Math.round(cobros_hoy * 100) / 100,
@@ -173,17 +174,15 @@ export const dashboardService = {
     const en3diasDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
     const hasta = `${en3diasDate.getFullYear()}-${String(en3diasDate.getMonth() + 1).padStart(2, '0')}-${String(en3diasDate.getDate()).padStart(2, '0')}`;
 
-    const [vencidasRes, proxRes] = await Promise.all([
-      supabase.from('cuotas').select('id', { count: 'exact' }).eq('estado', 'vencida'),
+    const [vencidas, proxRes] = await Promise.all([
+      cobrosService.countCuotasVencidasCalendario(hoy),
       supabase.from('cuotas').select('id', { count: 'exact' })
         .eq('estado', 'pendiente').gt('fecha_vencimiento', hoy).lte('fecha_vencimiento', hasta),
     ]);
 
-    if (vencidasRes.error) console.warn('dashboard.alerts vencidas:', vencidasRes.error.message);
     if (proxRes.error) console.warn('dashboard.alerts proximas:', proxRes.error.message);
 
     const alertas = [];
-    const vencidas = vencidasRes.count ?? 0;
     const proximas = proxRes.count ?? 0;
 
     if (vencidas > 0)

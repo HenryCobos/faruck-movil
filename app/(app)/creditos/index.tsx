@@ -16,6 +16,7 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen';
 import { Badge } from '@/components/ui/Badge';
 import { SearchBar } from '@/components/ui/SearchBar';
 import { Colors } from '@/constants/colors';
+import { etiquetaCategoriaProducto } from '@/constants/categoriasProducto';
 
 const ESTADO_VARIANT: Record<string, any> = {
   solicitado: 'warning', aprobado: 'info', activo: 'success',
@@ -29,6 +30,7 @@ const ESTADO_LABEL: Record<string, string> = {
 
 const TIPO_ICON: Record<string, string> = {
   inmueble: '🏠', vehiculo: '🚗', joya: '💍', electrodomestico: '📺', otro: '📦',
+  celular: '📱', motocicleta: '🏍️',
 };
 
 function PrestamoCard({ item }: { item: any }) {
@@ -40,6 +42,9 @@ function PrestamoCard({ item }: { item: any }) {
   const saldoCapital = esActivo ? saldoCapitalPrestamoActivo(item) : null;
   const muestraOriginal = esActivo && saldoCapital != null && mostrarLineaOriginalActivo(saldoCapital, montoOriginal);
   const montoGrande = esActivo ? formatCurrency(saldoCapital!) : formatCurrency(montoOriginal);
+  const categoriaLabel = item.categoria_producto
+    ? etiquetaCategoriaProducto(item.categoria_producto, item.categoria_producto_otro)
+    : null;
 
   return (
     <TouchableOpacity
@@ -64,6 +69,11 @@ function PrestamoCard({ item }: { item: any }) {
             {cliente?.nombre} {cliente?.apellido}
             {!!cliente?.alias && <Text style={styles.cardAlias}> · {cliente.alias}</Text>}
           </Text>
+          {categoriaLabel ? (
+            <Text style={styles.cardProductCat} numberOfLines={1}>
+              {TIPO_ICON[item.categoria_producto ?? ''] ?? '🏷️'} {categoriaLabel}
+            </Text>
+          ) : null}
           {esProducto && item.descripcion_producto ? (
             <Text style={styles.cardProductDesc} numberOfLines={1}>{item.descripcion_producto}</Text>
           ) : null}
@@ -241,5 +251,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   tipoBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.accent },
+  cardProductCat: { fontSize: 12, color: Colors.text, marginTop: 2, fontWeight: '600' },
   cardProductDesc: { fontSize: 12, color: Colors.muted, marginTop: 2, fontStyle: 'italic' },
 });

@@ -210,6 +210,11 @@ export default function AbonoCaptialScreen() {
         modo:            'nuevo',
         cancelado:       esCancelado ? '1' : '0',
         interesAhorrado: String(resultado.interes_ahorrado ?? 0),
+        tipoPrestamo:    prestamo.tipo_prestamo ?? 'prestamo',
+        ...(prestamo.categoria_producto ? {
+          categoriaProducto:     prestamo.categoria_producto,
+          categoriaProductoOtro: prestamo.categoria_producto_otro ?? '',
+        } : {}),
       },
     } as any);
   }, [resultado]);

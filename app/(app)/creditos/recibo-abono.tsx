@@ -11,6 +11,14 @@ import * as Sharing from 'expo-sharing';
 import { configuracionService, Configuracion } from '@/services/configuracion.service';
 import { formatCurrency } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
+import type { TipoPrestamo } from '@/types';
+import {
+  etiquetaOperacionRecibo,
+  etiquetaSubCancelacionTotal,
+  etiquetaTituloCancelacionTotal,
+  normalizeCategoriaProducto,
+  normalizeTipoPrestamo,
+} from '@/utils/prestamoEtiqueta';
 
 // ─── HTML para PDF ────────────────────────────────────────────
 
@@ -27,8 +35,18 @@ function generarHtmlReciboAbono(params: {
   config: Configuracion;
   cancelado?: boolean;
   interesAhorrado?: number;
+  tipoPrestamo: TipoPrestamo;
+  categoriaProducto?: string;
+  categoriaProductoOtro?: string;
 }): string {
   const { config } = params;
+  const tipo = params.tipoPrestamo;
+  const cancelSubHtml = etiquetaSubCancelacionTotal(tipo).replace(/\n/g, '<br>');
+  const operacionLine = etiquetaOperacionRecibo(
+    tipo,
+    params.categoriaProducto,
+    params.categoriaProductoOtro,
+  );
   const s = config.simbolo_moneda;
   const metodosLabel: Record<string, string> = {
     efectivo: 'Efectivo', transferencia: 'Transferencia Bancaria', cheque: 'Cheque',
@@ -69,6 +87,7 @@ function generarHtmlReciboAbono(params: {
     .section-label { font-size: 9px; font-weight: 700; color: #aaa; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
     .cliente-nombre { font-size: 17px; font-weight: 800; color: #111; }
     .cliente-sub { font-size: 12px; color: #888; margin-top: 3px; }
+    .cliente-operacion { font-size: 12px; color: #666; margin-top: 6px; font-weight: 600; }
     .cut-line { border: none; border-top: 2px dashed #e5e5e5; margin: 18px 0; }
     .desglose-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
     .desglose-row:last-child { border-bottom: none; }
@@ -125,6 +144,7 @@ function generarHtmlReciboAbono(params: {
         <div class="section-label">Cliente</div>
         <div class="cliente-nombre">${params.clienteNombre}</div>
         <div class="cliente-sub">Abono a capital &nbsp;·&nbsp; ${metodosLabel[params.metodo] ?? params.metodo}</div>
+        <div class="cliente-operacion">Operación: ${operacionLine}</div>
       </div>
 
       <hr class="cut-line">
@@ -167,15 +187,17 @@ function generarHtmlReciboAbono(params: {
 
       <div style="text-align:center;margin:10px 0 4px;font-size:11px;color:#888">
         ${params.cancelado
-          ? 'Préstamo liquidado anticipadamente. Conserve este comprobante.'
+          ? (tipo === 'credito_producto'
+            ? 'Compra a crédito liquidada anticipadamente. Conserve este comprobante.'
+            : 'Préstamo liquidado anticipadamente. Conserve este comprobante.')
           : 'Gracias por su pago. El cronograma ha sido actualizado.'}
       </div>
 
       ${params.cancelado ? `
       <div style="background:#dcfce7;border:1px solid #86efac;border-radius:12px;padding:16px;text-align:center;margin:14px 0">
         <div style="font-size:28px">🎉</div>
-        <div style="font-size:15px;font-weight:900;color:#166534;margin-top:6px;letter-spacing:1px">¡PRÉSTAMO SALDADO!</div>
-        <div style="font-size:11px;color:#166534;margin-top:4px">Ha cancelado su préstamo en su totalidad.<br>Su garantía quedará liberada a la brevedad.</div>
+        <div style="font-size:15px;font-weight:900;color:#166534;margin-top:6px;letter-spacing:1px">${etiquetaTituloCancelacionTotal(tipo)}</div>
+        <div style="font-size:11px;color:#166534;margin-top:4px">${cancelSubHtml}</div>
       </div>` : ''}
     </div>
 
@@ -197,6 +219,9 @@ export default function ReciboAbonoScreen() {
     saldoAnterior, saldoNuevo, nCuotas,
     nuevaCuota, metodo, fechaAbono,
     prestamoId, fromClienteId, modo, cancelado, interesAhorrado,
+    tipoPrestamo,
+    categoriaProducto,
+    categoriaProductoOtro,
   } = useLocalSearchParams<Record<string, string>>();
 
   const [config, setConfig] = useState<Configuracion | null>(null);
@@ -210,6 +235,16 @@ export default function ReciboAbonoScreen() {
   const nuevaCuotaN = nuevaCuota !== undefined && nuevaCuota !== '' ? Number(nuevaCuota) : undefined;
   const esCancelado = cancelado === '1' || saldoNvo <= 0;
   const interesAhorradoN = Number(interesAhorrado ?? 0);
+  const tipo = normalizeTipoPrestamo(tipoPrestamo);
+  const categoria = normalizeCategoriaProducto(categoriaProducto);
+  const categoriaOtro = categoriaProductoOtro?.trim() || undefined;
+  const operacionLine = `Operación: ${etiquetaOperacionRecibo(tipo, categoria, categoriaOtro)}`;
+  const cancelSubLineas = etiquetaSubCancelacionTotal(tipo).split('\n');
+  const graciasPie = esCancelado
+    ? (tipo === 'credito_producto'
+      ? 'Compra a crédito liquidada anticipadamente. Conserve este comprobante.'
+      : 'Préstamo liquidado anticipadamente. Conserve este comprobante.')
+    : 'Gracias por su pago. El cronograma ha sido actualizado.';
 
   const fechaHora = (() => {
     const ahora = new Date();
@@ -259,6 +294,9 @@ export default function ReciboAbonoScreen() {
         config,
         cancelado:     esCancelado,
         interesAhorrado: interesAhorradoN,
+        tipoPrestamo: tipo,
+        categoriaProducto: categoria,
+        categoriaProductoOtro: categoriaOtro,
       });
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {
@@ -353,6 +391,7 @@ export default function ReciboAbonoScreen() {
               <Text style={styles.clienteSub}>
                 Abono a capital &nbsp;·&nbsp; {metodosLabel[metodo ?? 'efectivo']}
               </Text>
+              <Text style={styles.clienteOperacion}>{operacionLine}</Text>
             </View>
 
             {/* Línea punteada */}
@@ -420,17 +459,15 @@ export default function ReciboAbonoScreen() {
             </View>
 
             <Text style={styles.graciasText}>
-              {esCancelado
-                ? 'Préstamo liquidado anticipadamente. Conserve este comprobante.'
-                : 'Gracias por su pago. El cronograma ha sido actualizado.'}
+              {graciasPie}
             </Text>
 
             {esCancelado && (
               <View style={styles.canceladoBox}>
                 <Text style={styles.canceladoIcon}>🎉</Text>
-                <Text style={styles.canceladoTitulo}>¡PRÉSTAMO SALDADO!</Text>
+                <Text style={styles.canceladoTitulo}>{etiquetaTituloCancelacionTotal(tipo)}</Text>
                 <Text style={styles.canceladoSub}>
-                  Ha cancelado su préstamo en su totalidad.{'\n'}Su garantía quedará liberada a la brevedad.
+                  {cancelSubLineas.join('\n')}
                 </Text>
               </View>
             )}
@@ -524,6 +561,7 @@ const styles = StyleSheet.create({
   clienteSection: { marginBottom: 18, gap: 4 },
   clienteNombre: { fontSize: 18, fontWeight: '800', color: Colors.text, marginTop: 4 },
   clienteSub: { fontSize: 12, color: Colors.muted },
+  clienteOperacion: { fontSize: 12, color: Colors.muted, marginTop: 6, fontWeight: '600' },
 
   cutLine: {
     height: 1, marginVertical: 16, position: 'relative',

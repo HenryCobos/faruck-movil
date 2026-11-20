@@ -170,6 +170,11 @@ export default function RegistrarPagoScreen() {
                       : (resultado.saldo_pendiente ?? 0),
                   ),
                   soloInteres:    esPagoSoloInteres ? '1' : '0',
+                  tipoPrestamo:   cuota.tipo_prestamo ?? 'prestamo',
+                  ...(cuota.categoria_producto ? {
+                    categoriaProducto:     cuota.categoria_producto,
+                    categoriaProductoOtro: cuota.categoria_producto_otro ?? '',
+                  } : {}),
                 },
               } as any);
             } catch (e: any) {

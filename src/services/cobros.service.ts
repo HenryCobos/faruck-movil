@@ -1,5 +1,6 @@
 import { supabase, withTimeout } from '../lib/supabase';
 import { auditoriaService } from './auditoria.service';
+import type { CategoriaProducto, TipoPrestamo } from '../types';
 
 export interface CuotaPendiente {
   id: string;
@@ -18,6 +19,10 @@ export interface CuotaPendiente {
   cliente_documento: string;
   garantia_tipo: string;
   garantia_descripcion: string;
+  /** Enriquecido en getCuotaById desde prestamos (la vista puede no exponerlo). */
+  tipo_prestamo?: TipoPrestamo;
+  categoria_producto?: CategoriaProducto;
+  categoria_producto_otro?: string;
 }
 
 export interface ResultadoPago {
@@ -60,7 +65,29 @@ export interface ResultadoAnulacion {
   garantia_revertida: boolean;
 }
 
+/**
+ * Misma regla que el chip "Vencidas" en Cobros: cuotas de préstamos activos con
+ * fecha_vencimiento estrictamente anterior a `hoy` y aún pendientes de cobro.
+ */
+async function countCuotasVencidasCalendario(hoy: string): Promise<number> {
+  const { count, error } = await withTimeout(
+    supabase
+      .from('cuotas')
+      .select('id, prestamos!inner(estado)', { count: 'exact', head: true })
+      .eq('prestamos.estado', 'activo')
+      .in('estado', ['pendiente', 'vencida', 'parcial'])
+      .lt('fecha_vencimiento', hoy),
+  );
+  if (error) {
+    console.warn('[cobros] countCuotasVencidasCalendario:', error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
 export const cobrosService = {
+  countCuotasVencidasCalendario,
+
   async getCuotasPendientes(): Promise<CuotaPendiente[]> {
     const { data, error } = await withTimeout(
       supabase
@@ -79,7 +106,33 @@ export const cobrosService = {
       .eq('id', id)
       .single();
     if (error) throw error;
-    return data as CuotaPendiente;
+    const cuota = data as CuotaPendiente;
+    const prestamoId = cuota.prestamo_id;
+    if (!prestamoId) return cuota;
+    const { data: prest, error: prestErr } = await supabase
+      .from('prestamos')
+      .select('tipo_prestamo, categoria_producto, categoria_producto_otro')
+      .eq('id', prestamoId)
+      .single();
+    if (prestErr) {
+      console.warn('[cobros] getCuotaById prestamo enrich:', prestErr.message);
+      return cuota;
+    }
+    const row = prest as {
+      tipo_prestamo?: string;
+      categoria_producto?: string;
+      categoria_producto_otro?: string;
+    } | null;
+    const tp = row?.tipo_prestamo;
+    const extra: Pick<CuotaPendiente, 'tipo_prestamo' | 'categoria_producto' | 'categoria_producto_otro'> = {};
+    if (tp === 'credito_producto' || tp === 'prestamo') {
+      extra.tipo_prestamo = tp;
+    }
+    if (row?.categoria_producto) {
+      extra.categoria_producto = row.categoria_producto as CategoriaProducto;
+      extra.categoria_producto_otro = row.categoria_producto_otro ?? undefined;
+    }
+    return Object.keys(extra).length > 0 ? { ...cuota, ...extra } : cuota;
   },
 
   async getPagosByCuota(cuotaId: string): Promise<PagoRegistrado[]> {

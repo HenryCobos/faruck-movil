@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type Control, type FieldValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectOption } from '@/components/ui/Select';
+import { clienteToSelectOption } from '@/utils/clienteSelectOption';
 import { Colors } from '@/constants/colors';
 import { calcularAmortizacionFrancesa, formatCurrency } from '@/utils/amortizacion';
 import { FRECUENCIA_COBRO_OPTIONS, type FrecuenciaCobro } from '@/utils/frecuenciaCobro';
@@ -25,15 +26,40 @@ import {
   type CuotaManualFila,
 } from '@/utils/cronogramaManual';
 import { CronogramaManualEditor, cronogramaManualValido } from '@/components/creditos/CronogramaManualEditor';
+import { isCategoriaProducto } from '@/constants/categoriasProducto';
+import { CategoriaProductoFields } from '@/components/creditos/CategoriaProductoFields';
+import type { CategoriaProducto } from '@/types';
 
 const schema = z.object({
   cliente_id: z.string().min(1, 'Selecciona el cliente'),
+  categoria_producto: z
+    .string()
+    .min(1, 'Selecciona una categoría')
+    .refine(isCategoriaProducto, 'Selecciona una categoría válida'),
+  categoria_producto_otro: z.string().optional(),
   descripcion_producto: z.string().min(3, 'Describe el producto (mínimo 3 caracteres)'),
   monto_principal: z.coerce.number().min(1, 'Monto mínimo $1'),
   plazo_meses: z.coerce.number().int().min(1, 'Mínimo 1 cuota').max(520, 'Máximo 520 cuotas'),
   frecuencia_cobro: z.enum(['mensual', 'quincenal', 'semanal']).default('mensual'),
   garantia_id: z.string().optional(),
   observaciones: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.categoria_producto === 'otro') {
+    const t = (data.categoria_producto_otro ?? '').trim();
+    if (t.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indica el nombre de la categoría (mín. 2 caracteres)',
+        path: ['categoria_producto_otro'],
+      });
+    } else if (t.length > 40) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Máximo 40 caracteres',
+        path: ['categoria_producto_otro'],
+      });
+    }
+  }
 });
 
 type FormData = z.infer<typeof schema>;
@@ -115,6 +141,8 @@ export default function NuevoCreditoProductoScreen() {
     resolver: zodResolver(schema) as any,
     defaultValues: {
       cliente_id: params.clienteId ?? '',
+      categoria_producto: '' as unknown as CategoriaProducto,
+      categoria_producto_otro: '',
       descripcion_producto: '',
       monto_principal: 0,
       plazo_meses: 1,
@@ -127,6 +155,8 @@ export default function NuevoCreditoProductoScreen() {
   useFocusEffect(useCallback(() => {
     reset({
       cliente_id: params.clienteId ?? '',
+      categoria_producto: '' as unknown as CategoriaProducto,
+      categoria_producto_otro: '',
       descripcion_producto: '',
       monto_principal: 0,
       plazo_meses: 1,
@@ -143,11 +173,7 @@ export default function NuevoCreditoProductoScreen() {
     setLoadingClientes(true);
     clientesService.getAll()
       .then(cs => {
-        setClientes(cs.map(c => ({
-          label: `${c.nombre} ${c.apellido}${c.alias ? ` (${c.alias})` : ''} — ${c.documento_numero}`,
-          value: c.id,
-          icon: '👤',
-        })));
+        setClientes(cs.map(clienteToSelectOption));
       })
       .catch(console.error)
       .finally(() => setLoadingClientes(false));
@@ -187,7 +213,9 @@ export default function NuevoCreditoProductoScreen() {
       .finally(() => setLoadingGarantias(false));
   }, [selectedCliente]);
 
-  const [monto, plazo, frecuenciaCobro] = watch(['monto_principal', 'plazo_meses', 'frecuencia_cobro']);
+  const [monto, plazo, frecuenciaCobro] = watch([
+    'monto_principal', 'plazo_meses', 'frecuencia_cobro',
+  ]);
 
   const freq = (frecuenciaCobro as FrecuenciaCobro) ?? 'mensual';
 
@@ -219,6 +247,9 @@ export default function NuevoCreditoProductoScreen() {
         {
           cliente_id: values.cliente_id,
           descripcion_producto: values.descripcion_producto,
+          categoria_producto: values.categoria_producto as CategoriaProducto,
+          categoria_producto_otro:
+            values.categoria_producto === 'otro' ? values.categoria_producto_otro?.trim() : undefined,
           monto_principal: values.monto_principal,
           plazo_meses: values.plazo_meses,
           frecuencia_cobro: values.frecuencia_cobro,
@@ -283,6 +314,8 @@ export default function NuevoCreditoProductoScreen() {
                   value={field.value}
                   onSelect={field.onChange}
                   placeholder={loadingClientes ? 'Cargando...' : 'Selecciona el cliente'}
+                  searchable
+                  searchPlaceholder="Buscar por nombre, alias, correo..."
                   error={errors.cliente_id?.message}
                 />
               )}
@@ -292,6 +325,15 @@ export default function NuevoCreditoProductoScreen() {
           {/* Sección: Producto */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Producto vendido</Text>
+            <CategoriaProductoFields
+              control={control as unknown as Control<FieldValues>}
+              errors={errors}
+              watch={(name) => watch(name) as string | undefined}
+              setValue={(name, value) => setValue(name, value)}
+              label="Categoría del producto *"
+              otroInputLabel="Nombre de categoría *"
+              otroPlaceholder="Ej: Muebles, Herramientas..."
+            />
             <Controller
               control={control}
               name="descripcion_producto"

@@ -15,6 +15,8 @@
 
 ## Build iOS
 
+**Build 1.3.1 (19)** — [EAS build](https://expo.dev/accounts/henryapper/projects/faruck-movil/builds/41765f7d-103c-4d84-8104-c946cb987973) · [submission](https://expo.dev/accounts/henryapper/projects/faruck-movil/submissions/7ed1560a-ff99-4494-b869-475d3ded3bdf)
+
 ```bash
 cd /Users/henryrimarachincobos/faruck-movil
 npx eas-cli build --platform ios --profile production --auto-submit

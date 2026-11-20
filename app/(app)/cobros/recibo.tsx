@@ -11,6 +11,15 @@ import * as Sharing from 'expo-sharing';
 import { configuracionService, Configuracion } from '@/services/configuracion.service';
 import { formatCurrency } from '@/utils/amortizacion';
 import { Colors } from '@/constants/colors';
+import type { TipoPrestamo } from '@/types';
+import {
+  etiquetaOperacionRecibo,
+  etiquetaSaldoPendienteRecibo,
+  etiquetaSubCancelacionTotal,
+  etiquetaTituloCancelacionTotal,
+  normalizeCategoriaProducto,
+  normalizeTipoPrestamo,
+} from '@/utils/prestamoEtiqueta';
 
 function Row({ label, value, color, size }: { label: string; value: string; color?: string; size?: 'sm' | 'md' }) {
   return (
@@ -34,10 +43,18 @@ function generarHtmlRecibo(params: {
   config: Configuracion;
   saldoPendiente?: number;
   esPagoSoloInteres?: boolean;
+  tipoPrestamo: TipoPrestamo;
+  categoriaProducto?: string;
+  categoriaProductoOtro?: string;
 }): string {
-  const saldoLabel = params.esPagoSoloInteres
-    ? 'Saldo de capital pendiente de la deuda'
-    : 'Saldo pendiente del préstamo';
+  const tipo = params.tipoPrestamo;
+  const saldoLabel = etiquetaSaldoPendienteRecibo(tipo, !!params.esPagoSoloInteres);
+  const operacionLine = etiquetaOperacionRecibo(
+    tipo,
+    params.categoriaProducto,
+    params.categoriaProductoOtro,
+  );
+  const cancelSubHtml = etiquetaSubCancelacionTotal(tipo).replace(/\n/g, '<br>');
   const { config } = params;
   const s = config.simbolo_moneda;
   const metodosLabel: Record<string, string> = {
@@ -88,6 +105,7 @@ function generarHtmlRecibo(params: {
     .section-label { font-size: 9px; font-weight: 700; color: #aaa; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
     .cliente-nombre { font-size: 17px; font-weight: 800; color: #111; }
     .cliente-cuota { font-size: 12px; color: #888; margin-top: 3px; }
+    .cliente-operacion { font-size: 12px; color: #666; margin-top: 6px; font-weight: 600; }
 
     /* Separador cortado */
     .cut-line {
@@ -170,6 +188,7 @@ function generarHtmlRecibo(params: {
         <div class="section-label">Cliente</div>
         <div class="cliente-nombre">${params.clienteNombre}</div>
         <div class="cliente-cuota">Cuota N° ${params.numeroCuota} &nbsp;·&nbsp; Método: ${metodosLabel[params.metodo] ?? params.metodo}</div>
+        <div class="cliente-operacion">Operación: ${operacionLine}</div>
       </div>
 
       <hr class="cut-line">
@@ -198,8 +217,8 @@ function generarHtmlRecibo(params: {
       ${params.cancelado ? `
       <div class="cancelado-box">
         <div class="cancelado-icon">🎉</div>
-        <div class="cancelado-titulo">¡PRÉSTAMO SALDADO!</div>
-        <div class="cancelado-sub">Ha cancelado su préstamo en su totalidad.<br>Su garantía quedará liberada a la brevedad.</div>
+        <div class="cancelado-titulo">${etiquetaTituloCancelacionTotal(tipo)}</div>
+        <div class="cancelado-sub">${cancelSubHtml}</div>
       </div>` : ''}
     </div>
 
@@ -217,6 +236,9 @@ export default function ReciboScreen() {
   const {
     reciboNum, clienteNombre, numeroCuota,
     capital, interes, total, metodo, cancelado, fechaPago, modo, saldoPendiente, soloInteres,
+    tipoPrestamo,
+    categoriaProducto,
+    categoriaProductoOtro,
   } = useLocalSearchParams<Record<string, string>>();
 
   const [config, setConfig] = useState<Configuracion | null>(null);
@@ -224,6 +246,9 @@ export default function ReciboScreen() {
   const [exportando, setExportando] = useState(false);
 
   const esCancelado = cancelado === '1';
+  const tipo = normalizeTipoPrestamo(tipoPrestamo);
+  const categoria = normalizeCategoriaProducto(categoriaProducto);
+  const categoriaOtro = categoriaProductoOtro?.trim() || undefined;
 
   // Si viene fecha del param (YYYY-MM-DD) la usamos; si no, la fecha actual.
   // La hora se toma siempre del momento en que se genera el recibo.
@@ -244,9 +269,9 @@ export default function ReciboScreen() {
   const tot   = Number(total ?? 0);
   const saldo = saldoPendiente !== undefined ? Number(saldoPendiente) : undefined;
   const esPagoSoloInteres = soloInteres === '1';
-  const saldoLabel = esPagoSoloInteres
-    ? 'Saldo de capital pendiente de la deuda'
-    : 'Saldo pendiente del préstamo';
+  const saldoLabel = etiquetaSaldoPendienteRecibo(tipo, esPagoSoloInteres);
+  const operacionLine = `Operación: ${etiquetaOperacionRecibo(tipo, categoria, categoriaOtro)}`;
+  const cancelSubLineas = etiquetaSubCancelacionTotal(tipo).split('\n');
 
   useEffect(() => {
     configuracionService.get()
@@ -274,6 +299,9 @@ export default function ReciboScreen() {
         config,
         saldoPendiente: saldo,
         esPagoSoloInteres,
+        tipoPrestamo: tipo,
+        categoriaProducto: categoria,
+        categoriaProductoOtro: categoriaOtro,
       });
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       if (await Sharing.isAvailableAsync()) {
@@ -363,6 +391,7 @@ export default function ReciboScreen() {
               <Text style={styles.clienteCuota}>
                 Cuota N° {numeroCuota} &nbsp;·&nbsp; {metodosLabel[metodo ?? 'efectivo']}
               </Text>
+              <Text style={styles.clienteOperacion}>{operacionLine}</Text>
             </View>
 
             {/* Línea punteada */}
@@ -420,9 +449,9 @@ export default function ReciboScreen() {
             {esCancelado && (
               <View style={styles.canceladoBox}>
                 <Text style={styles.canceladoIcon}>🎉</Text>
-                <Text style={styles.canceladoTitulo}>¡PRÉSTAMO SALDADO!</Text>
+                <Text style={styles.canceladoTitulo}>{etiquetaTituloCancelacionTotal(tipo)}</Text>
                 <Text style={styles.canceladoSub}>
-                  Ha cancelado su préstamo en su totalidad.{'\n'}Su garantía quedará liberada a la brevedad.
+                  {cancelSubLineas.join('\n')}
                 </Text>
               </View>
             )}
@@ -503,6 +532,7 @@ const styles = StyleSheet.create({
   clienteSection: { marginBottom: 18, gap: 4 },
   clienteNombre: { fontSize: 18, fontWeight: '800', color: Colors.text, marginTop: 4 },
   clienteCuota: { fontSize: 12, color: Colors.muted },
+  clienteOperacion: { fontSize: 12, color: Colors.muted, marginTop: 6, fontWeight: '600' },
 
   cutLine: {
     height: 1, backgroundColor: Colors.border, borderStyle: 'dashed',

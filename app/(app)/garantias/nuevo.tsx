@@ -14,6 +14,7 @@ import { clientesService } from '@/services/clientes.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectOption } from '@/components/ui/Select';
+import { clienteToSelectOption } from '@/utils/clienteSelectOption';
 import { Colors } from '@/constants/colors';
 import { Cliente } from '@/types';
 
@@ -68,11 +69,7 @@ export default function NuevaGarantiaScreen() {
       .finally(() => setLoadingClientes(false));
   }, [reset, getDefaultValues]));
 
-  const clienteOptions: SelectOption[] = clientes.map(c => ({
-    label: `${c.nombre} ${c.apellido}${c.alias ? ` (${c.alias})` : ''} — ${c.documento_numero}`,
-    value: c.id,
-    icon: '👤',
-  }));
+  const clienteOptions: SelectOption[] = clientes.map(clienteToSelectOption);
 
   const pickImage = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -141,6 +138,8 @@ export default function NuevaGarantiaScreen() {
             <Controller control={control} name="cliente_id" render={({ field: { onChange, value } }) => (
               <Select label="Cliente" options={clienteOptions} value={value} onSelect={onChange}
                 placeholder={loadingClientes ? 'Cargando clientes...' : 'Seleccionar cliente...'}
+                searchable
+                searchPlaceholder="Buscar por nombre, alias, correo..."
                 error={errors.cliente_id?.message} />
             )} />
           </View>

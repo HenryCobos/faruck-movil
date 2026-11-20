@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, type Control, type FieldValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectOption } from '@/components/ui/Select';
+import { clienteToSelectOption } from '@/utils/clienteSelectOption';
 import { Colors } from '@/constants/colors';
 import { calcularAmortizacion, formatCurrency } from '@/utils/amortizacion';
 import {
@@ -30,6 +31,9 @@ import {
   type CuotaManualFila,
 } from '@/utils/cronogramaManual';
 import { CronogramaManualEditor, cronogramaManualValido } from '@/components/creditos/CronogramaManualEditor';
+import { CategoriaProductoFields } from '@/components/creditos/CategoriaProductoFields';
+import { isCategoriaProducto } from '@/constants/categoriasProducto';
+import type { CategoriaProducto } from '@/types';
 import { MAX_CONTRATOS_ADJUNTOS } from '@/utils/contratosAdjuntos';
 import { exportarCronogramaPdf } from '@/utils/cronogramaPdf';
 
@@ -45,6 +49,35 @@ const schema = z.object({
   tipo_amortizacion: z.enum(['francesa', 'alemana', 'solo_interes', 'anticipado', 'solo_interes_adelantado']),
   comision_apertura: z.coerce.number().min(0).optional(),
   observaciones: z.string().optional(),
+  categoria_producto: z.string().optional(),
+  categoria_producto_otro: z.string().optional(),
+}).superRefine((data, ctx) => {
+  const raw = (data.categoria_producto ?? '').trim();
+  if (!raw) return;
+  if (!isCategoriaProducto(raw)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Selecciona una categoría válida',
+      path: ['categoria_producto'],
+    });
+    return;
+  }
+  if (raw === 'otro') {
+    const t = (data.categoria_producto_otro ?? '').trim();
+    if (t.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Indica el nombre de la categoría (mín. 2 caracteres)',
+        path: ['categoria_producto_otro'],
+      });
+    } else if (t.length > 40) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Máximo 40 caracteres',
+        path: ['categoria_producto_otro'],
+      });
+    }
+  }
 });
 
 type FormData = z.infer<typeof schema>;
@@ -212,6 +245,8 @@ export default function NuevoPrestamoScreen() {
     tipo_amortizacion: 'francesa' as const,
     comision_apertura: 0,
     observaciones: '',
+    categoria_producto: '',
+    categoria_producto_otro: '',
   }), [params.clienteId, params.garantiaId]);
 
   const { control, handleSubmit, formState: { errors }, watch, setValue, reset, getValues } = useForm<FormData>({
@@ -257,11 +292,7 @@ export default function NuevoPrestamoScreen() {
     setLoadingClientes(true);
     clientesService.getAll()
       .then(cs => {
-        setClientes(cs.map(c => ({
-          label: `${c.nombre} ${c.apellido}${c.alias ? ` (${c.alias})` : ''} — ${c.documento_numero}`,
-          value: c.id,
-          icon: '👤',
-        })));
+        setClientes(cs.map(clienteToSelectOption));
       })
       .catch(console.error)
       .finally(() => setLoadingClientes(false));
@@ -417,8 +448,11 @@ export default function NuevoPrestamoScreen() {
         ? Math.ceil(plazoDias / 30) || 1
         : Number(data.plazo_meses);
 
+      const catRaw = (data.categoria_producto ?? '').trim();
+      const conCategoria = catRaw && isCategoriaProducto(catRaw);
+      const { categoria_producto: _c, categoria_producto_otro: _co, ...restData } = data;
       const p = await prestamosService.create({
-        ...data,
+        ...restData,
         monto_principal: Number(data.monto_principal),
         tasa_mensual: Number(data.tasa_mensual) / 100,
         plazo_meses: plazoMesesCalculado,
@@ -429,6 +463,13 @@ export default function NuevoPrestamoScreen() {
         cronograma_manual: personalizarCuotas && Number(data.tasa_mensual) === 0
           ? filasToCronogramaJson(filasManual)
           : null,
+        ...(conCategoria
+          ? {
+              categoria_producto: catRaw as CategoriaProducto,
+              categoria_producto_otro:
+                catRaw === 'otro' ? data.categoria_producto_otro?.trim() : undefined,
+            }
+          : {}),
       }, profile.id);
 
       if (docAssets.length > 0) {
@@ -472,6 +513,8 @@ export default function NuevoPrestamoScreen() {
             <Controller control={control} name="cliente_id" render={({ field: { onChange, value } }) => (
               <Select label="Cliente / Prestatario" options={clientes} value={value} onSelect={onChange}
                 placeholder={loadingClientes ? 'Cargando clientes...' : 'Seleccionar cliente...'}
+                searchable
+                searchPlaceholder="Buscar por nombre, alias, correo..."
                 error={errors.cliente_id?.message} />
             )} />
             <Controller control={control} name="garantia_id" render={({ field: { onChange, value } }) => (
@@ -484,6 +527,14 @@ export default function NuevoPrestamoScreen() {
                 }
                 error={errors.garantia_id?.message} />
             )} />
+            <CategoriaProductoFields
+              control={control as unknown as Control<FieldValues>}
+              errors={errors}
+              watch={(name) => watch(name) as string | undefined}
+              setValue={(name, value) => setValue(name, value)}
+              label="Categoría del producto (opcional)"
+              hint="Indica sobre qué tipo de bien u operación es el préstamo; aparecerá en el comprobante de pago."
+            />
             {selectedCliente && !loadingGarantias && garantias.length === 0 && (
               <TouchableOpacity
                 style={styles.noGarantiaBanner}

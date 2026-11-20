@@ -25,6 +25,9 @@ import { Colors } from '@/constants/colors';
 import { Cuota, CuotaEstado, AbonoCapital } from '@/types';
 import { formatCurrency, parseFechaLocal, calcularSaldoRestanteCuota, calcularAsignacionPago, textoPlazoCuotas, labelFrecuencia } from '@/utils/amortizacion';
 import type { FrecuenciaCobro } from '@/types';
+import { etiquetaCategoriaProducto, isCategoriaProducto } from '@/constants/categoriasProducto';
+import { CategoriaProductoChipPicker } from '@/components/creditos/CategoriaProductoChipPicker';
+import type { CategoriaProducto } from '@/types';
 import {
   parseContratosAdjuntos,
   displayNombre,
@@ -176,6 +179,10 @@ export default function CreditoDetailScreen() {
   const [motivoAnulacionAbono, setMotivoAnulacionAbono] = useState('');
   const [anulandoAbono, setAnulandoAbono] = useState(false);
   const [showActivarModal, setShowActivarModal] = useState(false);
+  const [showCategoriaModal, setShowCategoriaModal] = useState(false);
+  const [draftCategoria, setDraftCategoria] = useState('');
+  const [draftCategoriaOtro, setDraftCategoriaOtro] = useState('');
+  const [savingCategoria, setSavingCategoria] = useState(false);
   const [fechaDesembolso, setFechaDesembolso] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [prestamoHijoRenovacion, setPrestamoHijoRenovacion] = useState<PrestamoRenovacionHijo | null>(null);
@@ -282,6 +289,58 @@ export default function CreditoDetailScreen() {
 
   const contratosDocs = prestamo ? parseContratosAdjuntos(prestamo) : [];
   const puedeGestionarContratos = profile?.rol === 'admin' || profile?.rol === 'oficial';
+  const puedeEditarCategoria = puedeGestionarContratos;
+
+  const abrirModalCategoria = () => {
+    if (!prestamo) return;
+    setDraftCategoria(prestamo.categoria_producto ?? '');
+    setDraftCategoriaOtro(prestamo.categoria_producto_otro ?? '');
+    setShowCategoriaModal(true);
+  };
+
+  const guardarCategoria = async () => {
+    if (!id) return;
+    const slug = draftCategoria.trim();
+    if (!slug) {
+      setSavingCategoria(true);
+      try {
+        await prestamosService.updateCategoriaProducto(id, { categoria_producto: null });
+        setShowCategoriaModal(false);
+        await load();
+      } catch (e: any) {
+        Alert.alert('Error', e.message ?? 'No se pudo actualizar la categoría');
+      } finally {
+        setSavingCategoria(false);
+      }
+      return;
+    }
+    if (!isCategoriaProducto(slug)) {
+      Alert.alert('Categoría', 'Selecciona una categoría válida');
+      return;
+    }
+    const otro = draftCategoriaOtro.trim();
+    if (slug === 'otro' && otro.length < 2) {
+      Alert.alert('Categoría', 'Indica el nombre de la categoría personalizada (mín. 2 caracteres)');
+      return;
+    }
+    if (slug === 'otro' && otro.length > 40) {
+      Alert.alert('Categoría', 'Máximo 40 caracteres en categoría personalizada');
+      return;
+    }
+    setSavingCategoria(true);
+    try {
+      await prestamosService.updateCategoriaProducto(id, {
+        categoria_producto: slug as CategoriaProducto,
+        categoria_producto_otro: slug === 'otro' ? otro : null,
+      });
+      setShowCategoriaModal(false);
+      await load();
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo actualizar la categoría');
+    } finally {
+      setSavingCategoria(false);
+    }
+  };
 
   const handleVerContrato = async (url: string) => {
     const supported = await Linking.canOpenURL(url);
@@ -593,6 +652,11 @@ export default function CreditoDetailScreen() {
           saldoPendiente: String(saldoCapitalPendiente),
           soloInteres:    '1',
         } : {}),
+        tipoPrestamo: prestamo.tipo_prestamo ?? 'prestamo',
+        ...(prestamo.categoria_producto ? {
+          categoriaProducto:     prestamo.categoria_producto,
+          categoriaProductoOtro: prestamo.categoria_producto_otro ?? '',
+        } : {}),
       },
     } as any);
   }, [prestamo, pagos, cuotas]);
@@ -845,6 +909,26 @@ export default function CreditoDetailScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{esProducto ? '🏷️ Producto & Condiciones' : '💰 Condiciones'}</Text>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Categoría</Text>
+            <View style={styles.categoriaValueCol}>
+              <Text
+                style={[
+                  styles.infoValue,
+                  !prestamo.categoria_producto && { color: Colors.muted },
+                ]}
+              >
+                {prestamo.categoria_producto
+                  ? (etiquetaCategoriaProducto(prestamo.categoria_producto, prestamo.categoria_producto_otro) ?? '—')
+                  : 'Sin asignar'}
+              </Text>
+              {puedeEditarCategoria ? (
+                <TouchableOpacity onPress={abrirModalCategoria} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.editCategoriaLink}>Editar categoría</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
           {esProducto && prestamo.descripcion_producto ? (
             <InfoRow label="Producto" value={prestamo.descripcion_producto} />
           ) : null}
@@ -1138,6 +1222,11 @@ export default function CreditoDetailScreen() {
                             fromClienteId: fromClienteId ?? '',
                             modo:          'ver',
                             cancelado:     abono.saldo_nuevo <= 0 ? '1' : '0',
+                            tipoPrestamo:  prestamo.tipo_prestamo ?? 'prestamo',
+                            ...(prestamo.categoria_producto ? {
+                              categoriaProducto:     prestamo.categoria_producto,
+                              categoriaProductoOtro: prestamo.categoria_producto_otro ?? '',
+                            } : {}),
                           },
                         } as any)}
                         activeOpacity={0.7}
@@ -1215,6 +1304,63 @@ export default function CreditoDetailScreen() {
                   disabled={anulandoAbono || !motivoAnulacionAbono.trim()}
                 />
               </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Modal editar categoría del producto */}
+        <Modal
+          visible={showCategoriaModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => { if (!savingCategoria) setShowCategoriaModal(false); }}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.activarOverlay}
+          >
+            <View style={styles.activarModalCard}>
+              <View style={styles.activarModalHeader}>
+                <Text style={styles.modalTitle}>🏷️ Categoría del crédito</Text>
+                <TouchableOpacity
+                  onPress={() => { if (!savingCategoria) setShowCategoriaModal(false); }}
+                  style={styles.activarModalCloseBtn}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.activarModalCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                style={styles.activarModalScroll}
+                contentContainerStyle={styles.activarModalScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                <CategoriaProductoChipPicker
+                  value={draftCategoria}
+                  categoriaOtro={draftCategoriaOtro}
+                  onSelect={setDraftCategoria}
+                  onOtroChange={setDraftCategoriaOtro}
+                  label="Categoría del producto"
+                  hint="Aparece en comprobantes como «Préstamo · Celular» o «Venta a crédito · Celular»."
+                  showClearButton
+                />
+              </ScrollView>
+              <View style={styles.activarModalFooter}>
+                <TouchableOpacity
+                  style={[styles.modalBtn, styles.modalBtnCancel]}
+                  onPress={() => setShowCategoriaModal(false)}
+                  disabled={savingCategoria}
+                >
+                  <Text style={styles.modalBtnCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: Colors.primary }, savingCategoria && styles.modalBtnDisabled]}
+                  onPress={guardarCategoria}
+                  disabled={savingCategoria}
+                >
+                  <Text style={styles.modalBtnConfirmText}>{savingCategoria ? 'Guardando...' : 'Guardar'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -1524,6 +1670,8 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontWeight: '700', color: Colors.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.border },
   infoLabel: { fontSize: 13, color: Colors.muted, flex: 1 },
+  categoriaValueCol: { flex: 1.2, alignItems: 'flex-end', gap: 4 },
+  editCategoriaLink: { fontSize: 13, fontWeight: '600', color: Colors.primary },
   infoValue: { fontSize: 13, fontWeight: '600', color: Colors.text, flex: 2, textAlign: 'right', textTransform: 'capitalize' },
   cronograma: { gap: 2 },
   cronogramaHeader: {
