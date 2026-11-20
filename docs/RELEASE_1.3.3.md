@@ -2,7 +2,7 @@
 
 **Producción anterior:** 1.3.2 (build 20)  
 **Objetivo:** 1.3.3 (build 21 vía EAS `autoIncrement`)  
-**Commit de referencia:** `3247eab` (release 1.3.3); base 1.3.2 en App Store: tag `v1.3.2` → `901a9f3`.
+**Commit de referencia:** `0a40982` (config EAS local + 1.3.3); tag `v1.3.2` → `901a9f3`.
 
 ## Cambios incluidos (delta respecto a 1.3.2)
 
@@ -29,7 +29,7 @@ where table_schema = 'public'
 
 ## Build iOS
 
-**Build 1.3.3 (21)** — EAS build: _(completar URL tras el build)_ · submission: _(completar URL tras submit)_
+**Build 1.3.3 (21)** — [EAS build](https://expo.dev/accounts/henryapper/projects/faruck-movil/builds/b964ee4f-fbfa-4fee-aee7-7c46e00b965d) · [submission](https://expo.dev/accounts/henryapper/projects/faruck-movil/submissions/7f4b8b7d-a209-4bbb-86ad-bf0b65724d21)
 
 ```bash
 cd /Users/henryrimarachincobos/faruck-movil
